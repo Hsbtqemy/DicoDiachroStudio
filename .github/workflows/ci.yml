@@ -60,9 +60,13 @@ jobs:
         run: |
           ruff check .
 
+      - name: Black version
+        run: |
+          python -m black --version
+
       - name: Format check (black)
         run: |
-          black --check --line-length 100 .
+          python -m black --check --diff --color --config pyproject.toml .
 
       - name: Run tests
         run: |
