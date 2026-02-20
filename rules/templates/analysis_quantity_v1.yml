@@ -1,0 +1,26 @@
+profile_id: analysis_quantity_v1
+name: Quantity Analysis Profile
+version: "1"
+description: Skeleton analysis profile for quantity/stress feature extraction.
+unicode: NFC
+display:
+  unicode: NFC
+  normalize_primes: true
+  char_map: {}
+  lowercase: false
+  collapse_spaces: true
+alignment:
+  unicode: NFC
+  normalize_primes: true
+  strip_diacritics: false
+  char_map:
+    "ſ": "ſ"
+  lowercase: false
+  remove_punctuation: false
+  remove_hyphens: false
+  collapse_spaces: true
+features:
+  stress_marks: ["ʹ", "ˈ", "́"]
+  quantity_marks:
+    "¯": "long"
+    "̆": "short"

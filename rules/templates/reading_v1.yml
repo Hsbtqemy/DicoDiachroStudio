@@ -1,0 +1,25 @@
+profile_id: reading_v1
+name: Reading Profile
+version: "1"
+description: Readable diplomatic display with normalized primes.
+unicode: NFC
+display:
+  unicode: NFC
+  normalize_primes: true
+  char_map:
+    "'": "ʹ"
+    "’": "ʹ"
+  lowercase: false
+  collapse_spaces: true
+alignment:
+  unicode: NFC
+  normalize_primes: true
+  strip_diacritics: false
+  char_map: {}
+  lowercase: false
+  remove_punctuation: false
+  remove_hyphens: false
+  collapse_spaces: true
+features:
+  stress_marks: ["ʹ", "ˈ", "́"]
+  quantity_marks: {}

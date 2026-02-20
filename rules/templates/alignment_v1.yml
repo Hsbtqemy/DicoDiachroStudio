@@ -1,0 +1,26 @@
+profile_id: alignment_v1
+name: Alignment Profile
+version: "1"
+description: Alignment-safe normalization (diacritics stripped, long-s normalized).
+unicode: NFC
+display:
+  unicode: NFC
+  normalize_primes: true
+  char_map:
+    "'": "ʹ"
+    "’": "ʹ"
+  lowercase: false
+  collapse_spaces: true
+alignment:
+  unicode: NFC
+  normalize_primes: true
+  strip_diacritics: true
+  char_map:
+    "ſ": "s"
+  lowercase: true
+  remove_punctuation: true
+  remove_hyphens: true
+  collapse_spaces: true
+features:
+  stress_marks: ["ʹ", "ˈ", "́"]
+  quantity_marks: {}

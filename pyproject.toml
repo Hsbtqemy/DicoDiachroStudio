@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dicodiachro"
+version = "0.1.0"
+description = "DicoDiachro Studio: diachronic dictionary nomenclature pipeline"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "DicoDiachro Team" }]
+dependencies = [
+  "typer>=0.16.0",
+  "PyYAML>=6.0.1",
+  "rapidfuzz>=3.9.0",
+  "requests>=2.32.0",
+  "openpyxl>=3.1.2",
+  "python-docx>=1.1.2",
+  "PySide6>=6.7.0",
+]
+
+[project.optional-dependencies]
+pdf = ["pdfplumber>=0.11.0"]
+dev = [
+  "pytest>=8.1.0",
+  "black>=24.4.2",
+  "ruff>=0.5.0",
+]
+
+[project.scripts]
+dicodiachro = "dicodiachro.cli.app:main"
+dicodiachro-studio = "dicodiachro_studio.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src", "studio"]
+include = ["dicodiachro*", "dicodiachro_studio*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["B008", "E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

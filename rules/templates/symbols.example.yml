@@ -1,0 +1,14 @@
+# Example symbol inventory per dictionary edition.
+symbols:
+  "ſ":
+    category: grapheme
+    meaning: long-s
+  "ʹ":
+    category: accent
+    meaning: prime / stress marker
+  "¯":
+    category: quantity
+    meaning: long quantity mark
+  "̆":
+    category: quantity
+    meaning: short quantity mark

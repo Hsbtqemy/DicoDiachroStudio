@@ -1,0 +1,11 @@
+# Example profile catalog for a dictionary edition.
+profiles:
+  - profile_id: reading_v1
+    name: Reading Profile
+    file: reading_v1.yml
+  - profile_id: alignment_v1
+    name: Alignment Profile
+    file: alignment_v1.yml
+  - profile_id: analysis_quantity_v1
+    name: Quantity Analysis Profile
+    file: analysis_quantity_v1.yml

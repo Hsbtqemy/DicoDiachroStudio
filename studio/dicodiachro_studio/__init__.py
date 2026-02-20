@@ -1,0 +1,1 @@
+"""DicoDiachro Studio GUI package."""
