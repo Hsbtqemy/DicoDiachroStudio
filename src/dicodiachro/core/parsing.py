@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 from .models import Issue, ParsedEntry
+from .parsers.presets import parse_line_with_preset
+
+if TYPE_CHECKING:
+    from .parsers.presets import ParserPresetSpec
 
 ENTRY_RE = re.compile(r"^([1-9]|10)\s+(.+?),\s*([avpſs])$")
 SECTION_RE = re.compile(r"^[A-ZΑ-ΩΪΫ]{1,4}$")
@@ -48,6 +53,8 @@ def parse_lines(
     lines: Iterable[str],
     dict_id: str,
     source_path: str,
+    parser_preset: ParserPresetSpec | None = None,
+    parser_sha256: str | None = None,
 ) -> tuple[list[ParsedEntry], list[Issue]]:
     entries: list[ParsedEntry] = []
     issues: list[Issue] = []
@@ -56,6 +63,8 @@ def parse_lines(
     for line_no, raw_line in enumerate(lines, start=1):
         line = raw_line.strip()
         if not line:
+            continue
+        if line.startswith("#"):
             continue
 
         if SECTION_RE.match(line):
@@ -74,6 +83,55 @@ def parse_lines(
                 )
             )
             continue
+
+        if parser_preset is not None:
+            parsed = parse_line_with_preset(line, parser_preset)
+            if parsed.matched:
+                if not current_section:
+                    issues.append(
+                        Issue(
+                            dict_id=dict_id,
+                            source_path=source_path,
+                            line_no=line_no,
+                            kind="warning",
+                            code="MISSING_SECTION",
+                            raw=raw_line.rstrip("\n"),
+                        )
+                    )
+                entries.append(
+                    ParsedEntry(
+                        dict_id=dict_id,
+                        section=current_section,
+                        syllables=int(parsed.values["syllables"]),
+                        headword_raw=str(parsed.values["headword_raw"]).strip(),
+                        pos_raw=str(parsed.values["pos_raw"]).strip(),
+                        pron_raw=str(
+                            parsed.values.get("pron_raw") or parsed.values["headword_raw"]
+                        ),
+                        source_path=source_path,
+                        line_no=line_no,
+                        raw_line=raw_line.rstrip("\n"),
+                        origin_raw=(
+                            str(parsed.values["origin_raw"]).strip()
+                            if "origin_raw" in parsed.values
+                            else None
+                        ),
+                        origin_norm=(
+                            str(parsed.values["origin_norm"]).strip()
+                            if "origin_norm" in parsed.values
+                            else None
+                        ),
+                        pos_norm=(
+                            str(parsed.values["pos_norm"]).strip()
+                            if "pos_norm" in parsed.values
+                            else None
+                        ),
+                        parser_id=parser_preset.parser_id,
+                        parser_version=parser_preset.version,
+                        parser_sha256=parser_sha256,
+                    )
+                )
+                continue
 
         match = ENTRY_RE.match(line)
         if match:
@@ -102,6 +160,9 @@ def parse_lines(
                     source_path=source_path,
                     line_no=line_no,
                     raw_line=raw_line.rstrip("\n"),
+                    parser_id=parser_preset.parser_id if parser_preset else None,
+                    parser_version=parser_preset.version if parser_preset else None,
+                    parser_sha256=parser_sha256 if parser_preset else None,
                 )
             )
             continue

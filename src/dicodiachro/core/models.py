@@ -21,26 +21,47 @@ class ParsedEntry:
     source_path: str
     line_no: int
     raw_line: str
+    origin_raw: str | None = None
+    origin_norm: str | None = None
+    pos_norm: str | None = None
+    parser_id: str | None = None
+    parser_version: int | None = None
+    parser_sha256: str | None = None
+    definition_raw: str | None = None
+    source_record: str | None = None
+    template_id: str | None = None
+    template_version: int | None = None
+    template_sha256: str | None = None
+    source_id: str | None = None
+    record_key: str | None = None
 
 
 @dataclass(slots=True)
 class ProfileSpec:
     profile_id: str
-    dict_id: str | None
-    name: str
-    version: str
+    version: int
+    dict_id: str | None = None
+    name: str = ""
     description: str = ""
-    unicode_mode: str = "NFC"
+    unicode_normalization: str = "NFC"
     display: dict[str, Any] = field(default_factory=dict)
-    alignment: dict[str, Any] = field(default_factory=dict)
-    features_rules: dict[str, Any] = field(default_factory=dict)
+    norm: dict[str, Any] = field(default_factory=dict)
+    render: dict[str, Any] = field(default_factory=dict)
+    features: dict[str, Any] = field(default_factory=dict)
+    qa: dict[str, Any] = field(default_factory=dict)
+    validation_warnings: list[str] = field(default_factory=list)
+    source_path: str | None = None
 
 
 @dataclass(slots=True)
 class ProfileApplied:
     form_display: str
     form_norm: str
+    form_render: str = ""
     features: dict[str, Any] = field(default_factory=dict)
+    symbols_used: list[str] = field(default_factory=list)
+    unknown_symbols: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

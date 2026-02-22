@@ -1,0 +1,29 @@
+profile_id: profile_qa_strict
+version: 1
+unicode:
+  normalization: NFC
+
+display:
+  normalize_primes: true
+  keep_long_s: true
+  collapse_spaces: true
+
+norm:
+  normalize_primes: true
+  lowercase: true
+  strip_diacritics: true
+  long_s_to_s: true
+  remove_punctuation: true
+  keep_hyphen: false
+  collapse_spaces: true
+
+features:
+  marks:
+    prime: "ʹ"
+    acute_vowels: "áéíóúÁÉÍÓÚ"
+  rules: []
+
+qa:
+  enforce_stress_consistency: true
+  require_prime_for_primary_stress: true
+  require_acute_for_primary_stress: false

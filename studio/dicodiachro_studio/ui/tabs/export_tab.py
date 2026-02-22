@@ -28,7 +28,7 @@ class ExportTab(QWidget):
         self.state = state
 
         self.dicts_edit = QLineEdit()
-        self.dicts_edit.setPlaceholderText("dict1,dict2,... for comparison exports")
+        self.dicts_edit.setPlaceholderText("corpus1,corpus2,... pour les exports de comparaison")
 
         csv_btn = QPushButton("Export entries CSV")
         jsonl_btn = QPushButton("Export entries JSONL")
@@ -50,7 +50,7 @@ class ExportTab(QWidget):
         actions.addWidget(session_btn)
 
         layout = QVBoxLayout()
-        layout.addWidget(QLabel("Comparison dictionaries"))
+        layout.addWidget(QLabel("Corpus de comparaison"))
         layout.addWidget(self.dicts_edit)
         layout.addLayout(actions)
         layout.addStretch(1)
@@ -61,7 +61,7 @@ class ExportTab(QWidget):
             QMessageBox.warning(self, "Project required", "Open a project first.")
             return False
         if not self.state.active_dict_id:
-            QMessageBox.warning(self, "Dictionary required", "Select an active dictionary.")
+            QMessageBox.warning(self, "Corpus requis", "Sélectionnez un corpus actif.")
             return False
         return True
 

@@ -1,0 +1,39 @@
+profile_id: convention_render_v1
+version: 1
+name: Convention Render Profile
+unicode:
+  normalization: NFC
+
+display:
+  normalize_primes: true
+  keep_long_s: true
+  collapse_spaces: true
+
+norm:
+  normalize_primes: true
+  lowercase: true
+  strip_diacritics: true
+  long_s_to_s: true
+  remove_punctuation: false
+  keep_hyphen: false
+  collapse_spaces: true
+
+render:
+  enabled: true
+  source: display
+  parenthesize_accented_vowel: true
+  parenthesize_prime_segment: true
+  open_paren: "("
+  close_paren: ")"
+  collapse_spaces: true
+
+features:
+  marks:
+    prime: "ʹ"
+    acute_vowels: "áéíóúÁÉÍÓÚ"
+
+qa:
+  enforce_stress_consistency: false
+  require_prime_for_primary_stress: false
+  require_acute_for_primary_stress: false
+  require_pronunciation: false

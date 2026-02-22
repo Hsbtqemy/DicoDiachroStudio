@@ -1,0 +1,18 @@
+parser_id: syll_headword_pos_origin_v1
+version: 1
+entry_regex: '^([1-9]|10)\s+(.+?),\s*([a-z]\.)\s*([A-Z]\.)\s*$'
+fields:
+  syllables: 1
+  headword_raw: 2
+  pos_raw: 3
+  origin_raw: 4
+pos_map:
+  "f.": "ſ"
+  "a.": "a"
+  "v.": "v"
+  "p.": "p"
+origin_map:
+  "L.": "Latin"
+  "G.": "Greek"
+  "F.": "French"
+allow_extra_trailing: true

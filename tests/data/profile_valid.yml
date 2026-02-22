@@ -1,0 +1,34 @@
+profile_id: test_profile
+version: 1
+unicode:
+  normalization: NFC
+
+display:
+  normalize_primes: true
+  keep_long_s: true
+  collapse_spaces: true
+
+norm:
+  normalize_primes: true
+  lowercase: true
+  strip_diacritics: true
+  long_s_to_s: true
+  remove_punctuation: true
+  keep_hyphen: false
+  collapse_spaces: true
+
+features:
+  marks:
+    prime: "ʹ"
+    acute_vowels: "áéíóúÁÉÍÓÚ"
+    macron: "\u0304"
+    breve: "\u0306"
+  rules:
+    - when:
+        pattern: "(áʹ|éʹ|íʹ|óʹ|úʹ|Áʹ|Éʹ|Íʹ|Óʹ|Úʹ)"
+      set:
+        stress: "primary"
+    - when:
+        contains: "ʹ"
+      set:
+        has_prime: true

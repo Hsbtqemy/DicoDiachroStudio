@@ -33,7 +33,7 @@ class ProjectTab(QWidget):
         open_btn.clicked.connect(self.open_project)
         create_btn.clicked.connect(self.create_project)
 
-        self.dict_combo.currentTextChanged.connect(self.on_dict_changed)
+        self.dict_combo.currentIndexChanged.connect(self.on_dict_changed)
         self.profile_combo.currentTextChanged.connect(self.on_profile_changed)
 
         row = QHBoxLayout()
@@ -43,8 +43,8 @@ class ProjectTab(QWidget):
         form = QFormLayout()
         form.addRow("Project", self.project_label)
         form.addRow("Database", self.db_label)
-        form.addRow("Active dictionary", self.dict_combo)
-        form.addRow("Active profile", self.profile_combo)
+        form.addRow("Corpus actif", self.dict_combo)
+        form.addRow("Profil actif", self.profile_combo)
 
         layout = QVBoxLayout()
         layout.addLayout(row)
@@ -66,7 +66,8 @@ class ProjectTab(QWidget):
             return
         self.state.open_project(Path(path))
 
-    def on_dict_changed(self, dict_id: str) -> None:
+    def on_dict_changed(self, _: int) -> None:
+        dict_id = str(self.dict_combo.currentData() or "").strip()
         if dict_id:
             self.state.set_active_dict(dict_id)
 
@@ -81,13 +82,19 @@ class ProjectTab(QWidget):
         self.project_label.setText(str(self.state.project_dir))
         self.db_label.setText(str(project_paths(self.state.project_dir).db_path))
 
+        self.state.refresh_active_dict()
         dictionaries = self.state.list_dictionaries()
         self.dict_combo.blockSignals(True)
         self.dict_combo.clear()
         for row in dictionaries:
-            self.dict_combo.addItem(row["dict_id"])
+            label = str(row["label"] or "").strip()
+            if label and label != row["dict_id"]:
+                display = f"{label} [{row['dict_id']}]"
+            else:
+                display = row["dict_id"]
+            self.dict_combo.addItem(display, row["dict_id"])
         if self.state.active_dict_id:
-            idx = self.dict_combo.findText(self.state.active_dict_id)
+            idx = self.dict_combo.findData(self.state.active_dict_id)
             if idx >= 0:
                 self.dict_combo.setCurrentIndex(idx)
         self.dict_combo.blockSignals(False)

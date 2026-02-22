@@ -1,26 +1,55 @@
 profile_id: analysis_quantity_v1
 name: Quantity Analysis Profile
-version: "1"
-description: Skeleton analysis profile for quantity/stress feature extraction.
-unicode: NFC
+version: 1
+description: Analysis profile with stress/quantity-oriented feature extraction skeleton.
+unicode:
+  normalization: NFC
+
 display:
-  unicode: NFC
   normalize_primes: true
-  char_map: {}
-  lowercase: false
+  keep_long_s: true
   collapse_spaces: true
-alignment:
-  unicode: NFC
+
+norm:
   normalize_primes: true
-  strip_diacritics: false
-  char_map:
-    "ſ": "ſ"
-  lowercase: false
-  remove_punctuation: false
-  remove_hyphens: false
+  lowercase: true
+  strip_diacritics: true
+  long_s_to_s: true
+  remove_punctuation: true
+  keep_hyphen: false
   collapse_spaces: true
+
+render:
+  enabled: true
+  source: display
+  parenthesize_accented_vowel: true
+  parenthesize_prime_segment: true
+  open_paren: "("
+  close_paren: ")"
+  collapse_spaces: true
+
 features:
-  stress_marks: ["ʹ", "ˈ", "́"]
-  quantity_marks:
-    "¯": "long"
-    "̆": "short"
+  vowels: "aeiouyAEIOUY"
+  marks:
+    prime: "ʹ"
+    acute_vowels: "áéíóúÁÉÍÓÚ"
+    macron: "\u0304"
+    breve: "\u0306"
+  rules:
+    - when:
+        contains_any: "áéíóúÁÉÍÓÚ"
+      set:
+        has_accented_vowel: true
+    - when:
+        pattern: "(áʹ|éʹ|íʹ|óʹ|úʹ|Áʹ|Éʹ|Íʹ|Óʹ|Úʹ)"
+      set:
+        stress: "primary"
+    - when:
+        contains: "ʹ"
+      set:
+        has_prime: true
+
+qa:
+  enforce_stress_consistency: false
+  require_prime_for_primary_stress: false
+  require_acute_for_primary_stress: false

@@ -1,0 +1,10 @@
+profile_id: broken
+version: one
+unicode:
+  normalization: NFX
+features:
+  rules:
+    - when:
+        pattern: "("
+      set:
+        stress: primary
