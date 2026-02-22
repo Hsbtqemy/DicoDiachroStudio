@@ -7,7 +7,6 @@ from urllib.parse import unquote, urlparse
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -16,10 +15,12 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -103,7 +104,10 @@ class ImportTab(QWidget):
         self.csv_file_edit = self._build_readonly_path_edit("Aucun fichier CSV sélectionné")
         self.pdf_file_edit = self._build_readonly_path_edit("Aucun PDF sélectionné")
 
-        self.two_columns_check = QCheckBox("Double colonne")
+        self.columns_combo = QComboBox()
+        self.columns_combo.addItem("1", 1)
+        self.columns_combo.addItem("2", 2)
+        self.columns_combo.addItem("3", 3)
 
         self.log = QTextEdit()
         self.log.setReadOnly(True)
@@ -148,6 +152,14 @@ class ImportTab(QWidget):
         manage_corpus_adv_btn = QPushButton("Gérer les corpus…")
         rename_corpus_btn = QPushButton("Renommer corpus…")
         open_project_folder_btn = QPushButton("Ouvrir dossier projet")
+        self.project_menu_button = QToolButton(self)
+        self.project_menu_button.setText("Projet ▾")
+        self.project_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        project_menu = QMenu(self.project_menu_button)
+        self.project_open_folder_action = project_menu.addAction("Ouvrir dossier du projet")
+        self.project_open_action = project_menu.addAction("Changer de projet…")
+        self.project_new_action = project_menu.addAction("Nouveau projet…")
+        self.project_menu_button.setMenu(project_menu)
 
         download_url_btn.clicked.connect(self.import_url)
         run_btn.clicked.connect(self.run_pipeline)
@@ -185,12 +197,16 @@ class ImportTab(QWidget):
         manage_corpus_adv_btn.clicked.connect(self.manage_corpora)
         rename_corpus_btn.clicked.connect(self.rename_active_corpus)
         open_project_folder_btn.clicked.connect(self.open_project_folder)
+        self.project_open_folder_action.triggered.connect(self.open_project_folder)
+        self.project_open_action.triggered.connect(self.open_project_from_button)
+        self.project_new_action.triggered.connect(self.new_project_from_button)
 
         project_bar = QHBoxLayout()
         project_bar.addWidget(self.project_label, 2)
         project_bar.addWidget(self.db_label, 2)
         project_bar.addWidget(self.active_corpus_label, 2)
         project_bar.addStretch(1)
+        project_bar.addWidget(self.project_menu_button)
         project_bar.addWidget(manage_corpus_btn)
         project_bar.addWidget(rename_corpus_btn)
         project_bar.addWidget(open_project_folder_btn)
@@ -228,7 +244,8 @@ class ImportTab(QWidget):
         source_grid.addWidget(import_pdf_btn, 3, 3)
         source_grid.addWidget(reveal_pdf_btn, 3, 4)
         source_grid.addWidget(open_pdf_btn, 3, 5)
-        source_grid.addWidget(self.two_columns_check, 3, 6)
+        source_grid.addWidget(QLabel("Colonnes"), 3, 6)
+        source_grid.addWidget(self.columns_combo, 3, 7)
         source_grid.setColumnStretch(1, 1)
 
         advanced_grid = QGridLayout()
@@ -286,6 +303,36 @@ class ImportTab(QWidget):
 
     def _append(self, text: str) -> None:
         self.log.append(text)
+
+    def _invoke_main_window_action(self, action_name: str) -> bool:
+        window = self.window()
+        method = getattr(window, action_name, None)
+        if callable(method):
+            method()
+            return True
+        return False
+
+    def open_project_from_button(self) -> None:
+        if self._invoke_main_window_action("open_project_dialog"):
+            return
+        selected_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Ouvrir un projet",
+            str(self.state.project_dir or Path.cwd()),
+        )
+        if selected_dir:
+            self.state.open_project(Path(selected_dir))
+
+    def new_project_from_button(self) -> None:
+        if self._invoke_main_window_action("new_project_dialog"):
+            return
+        selected_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Sélectionner un dossier pour le projet",
+            str(self.state.project_dir or Path.cwd()),
+        )
+        if selected_dir:
+            self.state.open_project(Path(selected_dir))
 
     def _refresh_project_bar(self) -> None:
         if not self.state.project_dir:
@@ -717,14 +764,14 @@ class ImportTab(QWidget):
 
         project_dir = self.state.project_dir
         assert project_dir is not None
-        two_columns = self.two_columns_check.isChecked()
+        columns = int(self.columns_combo.currentData() or 1)
 
         def _job() -> dict[str, object]:
             try:
                 imported = import_pdf_text(
                     project_dir=project_dir,
                     pdf_path=pdf_path,
-                    two_columns=two_columns,
+                    columns=columns,
                 )
             except PDFTextImportError as exc:
                 raise RuntimeError(f"{exc.code}: {exc}") from exc
@@ -735,7 +782,7 @@ class ImportTab(QWidget):
                     "type": "pdf_text",
                     "dict_id": self._selected_dict_id(),
                     "pdf_path": str(pdf_path),
-                    "two_columns": two_columns,
+                    "columns": columns,
                     **imported.as_dict(),
                 },
             )
@@ -743,7 +790,7 @@ class ImportTab(QWidget):
                 "action": "import_pdf_text",
                 "dict_id": self._selected_dict_id(),
                 "pdf_path": str(pdf_path),
-                "two_columns": two_columns,
+                "columns": columns,
                 "output_text_paths": [str(path) for path in imported.output_text_paths],
                 "pages_total": imported.pages_total,
                 "pages_with_text": imported.pages_with_text,

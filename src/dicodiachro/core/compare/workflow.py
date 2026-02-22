@@ -11,12 +11,17 @@ from uuid import uuid4
 from rapidfuzz import fuzz, process
 
 from ..storage.sqlite import SQLiteStore
+from ..utils import alpha_bucket_of
 
 SPACE_RE = re.compile(r"\s+")
 
 
 class CompareWorkflowError(RuntimeError):
     pass
+
+
+def alpha_bucket_of_key(headword_key: str) -> str:
+    return alpha_bucket_of(headword_key)
 
 
 def _effective(row: dict[str, Any], stem: str) -> str:
@@ -57,6 +62,17 @@ def _key_for_row(row: dict[str, Any], key_field: str) -> str:
         return _normalized_text(str(row.get(key_field) or ""))
 
     return _normalized_text(_effective(row, "headword"))
+
+
+def _letter_counts(
+    rows: list[dict[str, Any]], *, key_field: str = "headword_key"
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = str(row.get(key_field) or "")
+        bucket = alpha_bucket_of_key(key)
+        counts[bucket] = counts.get(bucket, 0) + 1
+    return counts
 
 
 def _rows_for_corpora(store: SQLiteStore, corpus_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -135,6 +151,7 @@ def preview_coverage(
     limit: int | None = 500,
     filters: dict[str, Any] | None = None,
     key_field: str = "headword_norm_effective",
+    alpha_bucket: str | None = None,
 ) -> dict[str, Any]:
     if len(corpus_ids) < 2:
         raise CompareWorkflowError("At least 2 corpora are required for coverage preview.")
@@ -165,6 +182,15 @@ def preview_coverage(
 
     mode = str((filters or {}).get("mode", "all"))
     filtered_rows = [row for row in rows if _coverage_filter(row, corpus_ids=corpus_ids, mode=mode)]
+    letter_counts = _letter_counts(filtered_rows)
+
+    cleaned_bucket = str(alpha_bucket or "").strip().upper()
+    if cleaned_bucket:
+        filtered_rows = [
+            row
+            for row in filtered_rows
+            if alpha_bucket_of_key(str(row.get("headword_key") or "")) == cleaned_bucket
+        ]
 
     if limit is not None:
         filtered_rows = filtered_rows[:limit]
@@ -202,7 +228,8 @@ def preview_coverage(
     return {
         "corpus_ids": corpus_ids,
         "key_field": key_field,
-        "filters": {"mode": mode},
+        "filters": {"mode": mode, "alpha_bucket": cleaned_bucket or None},
+        "letter_counts": letter_counts,
         "rows": filtered_rows,
         "counts": {
             "union": union_count,
@@ -371,6 +398,7 @@ def preview_alignment(
     limit: int | None = 500,
     key_field: str = "headword_norm_effective",
     include_unmatched: bool = True,
+    alpha_bucket: str | None = None,
 ) -> dict[str, Any]:
     if corpus_a == corpus_b:
         raise CompareWorkflowError("Corpus A and B must be different.")
@@ -418,6 +446,15 @@ def preview_alignment(
 
     rows = exact_rows + fuzzy_rows + unmatched_rows
     rows.sort(key=lambda row: (row["method"] != "exact", -float(row["score"]), row["headword_key"]))
+    letter_counts = _letter_counts(rows)
+
+    cleaned_bucket = str(alpha_bucket or "").strip().upper()
+    if cleaned_bucket:
+        rows = [
+            row
+            for row in rows
+            if alpha_bucket_of_key(str(row.get("headword_key") or "")) == cleaned_bucket
+        ]
     if limit is not None:
         rows = rows[:limit]
 
@@ -428,6 +465,8 @@ def preview_alignment(
         "threshold": int(threshold),
         "key_field": key_field,
         "include_unmatched": include_unmatched,
+        "alpha_bucket": cleaned_bucket or None,
+        "letter_counts": letter_counts,
         "rows": rows,
         "counts": {
             "total_a": len(index_a),
@@ -514,13 +553,19 @@ def preview_diff(
     run_settings: dict[str, Any],
     limit: int | None = 500,
     filters: dict[str, Any] | None = None,
+    alpha_bucket: str | None = None,
 ) -> dict[str, Any]:
     store = SQLiteStore(db_path)
 
     if run_settings.get("run_id"):
         run_id = str(run_settings["run_id"])
         pair_rows = [
-            dict(row) for row in store.compare_alignment_pairs(run_id, include_unmatched=False)
+            dict(row)
+            for row in store.compare_alignment_pairs(
+                run_id,
+                include_unmatched=False,
+                alpha_bucket=alpha_bucket,
+            )
         ]
         corpus_a = pair_rows[0]["corpus_a"] if pair_rows else ""
         corpus_b = pair_rows[0]["corpus_b"] if pair_rows else ""
@@ -530,6 +575,13 @@ def preview_diff(
             for row in run_settings.get("alignment_rows", [])
             if row.get("entry_id_a") and row.get("entry_id_b")
         ]
+        cleaned_bucket = str(alpha_bucket or "").strip().upper()
+        if cleaned_bucket:
+            pair_rows = [
+                row
+                for row in pair_rows
+                if alpha_bucket_of_key(str(row.get("headword_key") or "")) == cleaned_bucket
+            ]
         corpus_a = str(
             run_settings.get("corpus_a") or (pair_rows[0]["corpus_a"] if pair_rows else "")
         )
@@ -548,6 +600,7 @@ def preview_diff(
             limit=None,
             key_field=str(run_settings.get("key_field", "headword_norm_effective")),
             include_unmatched=False,
+            alpha_bucket=alpha_bucket,
         )
         pair_rows = [dict(row) for row in alignment_preview["rows"]]
 
@@ -588,13 +641,23 @@ def preview_diff(
 
     mode = str((filters or {}).get("mode", "all"))
     filtered_rows = [row for row in rows if _diff_filter(row, mode)]
+    letter_counts = _letter_counts(filtered_rows)
+
+    cleaned_bucket = str(alpha_bucket or "").strip().upper()
+    if cleaned_bucket:
+        filtered_rows = [
+            row
+            for row in filtered_rows
+            if alpha_bucket_of_key(str(row.get("headword_key") or "")) == cleaned_bucket
+        ]
     if limit is not None:
         filtered_rows = filtered_rows[:limit]
 
     return {
         "corpus_a": corpus_a,
         "corpus_b": corpus_b,
-        "filters": {"mode": mode},
+        "filters": {"mode": mode, "alpha_bucket": cleaned_bucket or None},
+        "letter_counts": letter_counts,
         "rows": filtered_rows,
         "counts": {
             "total_pairs": len(rows),
@@ -745,7 +808,26 @@ def list_compare_runs(db_path: Path, limit: int = 30) -> list[dict[str, Any]]:
     return rows
 
 
-def load_compare_run_data(db_path: Path, run_id: str) -> dict[str, Any]:
+def coverage_letter_counts(db_path: Path, run_id: str) -> dict[str, int]:
+    store = SQLiteStore(db_path)
+    return store.compare_coverage_letter_counts(run_id)
+
+
+def alignment_letter_counts(db_path: Path, run_id: str) -> dict[str, int]:
+    store = SQLiteStore(db_path)
+    return store.compare_alignment_letter_counts(run_id)
+
+
+def diff_letter_counts(db_path: Path, run_id: str) -> dict[str, int]:
+    store = SQLiteStore(db_path)
+    return store.compare_diff_letter_counts(run_id)
+
+
+def load_compare_run_data(
+    db_path: Path,
+    run_id: str,
+    alpha_bucket: str | None = None,
+) -> dict[str, Any]:
     store = SQLiteStore(db_path)
     run = store.compare_run_by_id(run_id)
     if run is None:
@@ -761,7 +843,7 @@ def load_compare_run_data(db_path: Path, run_id: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         stats = {}
 
-    coverage_rows_raw = [dict(row) for row in store.compare_coverage_items(run_id)]
+    coverage_rows_raw = [dict(row) for row in store.compare_coverage_items(run_id, alpha_bucket)]
     coverage_by_key: dict[str, dict[str, bool]] = {}
     for row in coverage_rows_raw:
         key = str(row.get("headword_key") or "")
@@ -782,10 +864,15 @@ def load_compare_run_data(db_path: Path, run_id: str) -> dict[str, Any]:
     ]
 
     alignment_rows = [
-        dict(row) for row in store.compare_alignment_pairs(run_id, include_unmatched=True)
+        dict(row)
+        for row in store.compare_alignment_pairs(
+            run_id,
+            include_unmatched=True,
+            alpha_bucket=alpha_bucket,
+        )
     ]
 
-    diff_rows_raw = [dict(row) for row in store.compare_diff_rows(run_id)]
+    diff_rows_raw = [dict(row) for row in store.compare_diff_rows(run_id, alpha_bucket)]
     diff_rows: list[dict[str, Any]] = []
     for row in diff_rows_raw:
         try:
@@ -828,13 +915,16 @@ def load_compare_run_data(db_path: Path, run_id: str) -> dict[str, Any]:
             "corpus_ids": corpus_ids,
             "rows": coverage_rows,
             "counts": stats.get("coverage", {}),
+            "letter_counts": store.compare_coverage_letter_counts(run_id),
         },
         "alignment": {
             "rows": alignment_rows,
             "counts": stats.get("alignment", {}),
+            "letter_counts": store.compare_alignment_letter_counts(run_id),
         },
         "diff": {
             "rows": diff_rows,
             "counts": stats.get("diff", {}),
+            "letter_counts": store.compare_diff_letter_counts(run_id),
         },
     }

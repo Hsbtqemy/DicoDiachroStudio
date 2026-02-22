@@ -233,8 +233,12 @@ def import_pdf_text_cmd(
         "--out",
         help="Optional output file or directory for extracted text.",
     ),
-    two_columns: bool = typer.Option(
-        False, "--two-columns/--no-two-columns", help="Read PDF as double-column pages."
+    columns: int = typer.Option(
+        1,
+        "--columns",
+        min=1,
+        max=3,
+        help="Number of text columns to reconstruct (1..3).",
     ),
     dict_id: str | None = typer.Option(
         None,
@@ -258,7 +262,7 @@ def import_pdf_text_cmd(
             project_dir=project_dir,
             pdf_path=pdf_path,
             out=out,
-            two_columns=two_columns,
+            columns=columns,
         )
     except PDFTextImportError as exc:
         typer.echo(str(exc))
@@ -272,7 +276,7 @@ def import_pdf_text_cmd(
         {
             "type": "pdf_text",
             "pdf_path": str(pdf_path),
-            "two_columns": two_columns,
+            "columns": columns,
             **imported.as_dict(),
         },
     )

@@ -29,7 +29,10 @@ from PySide6.QtWidgets import (
 
 from dicodiachro.core.compare.workflow import (
     CompareWorkflowError,
+    alignment_letter_counts,
     apply_compare_run,
+    coverage_letter_counts,
+    diff_letter_counts,
     list_compare_runs,
     load_compare_run_data,
     preview_alignment,
@@ -45,6 +48,7 @@ from dicodiachro.core.exporters.compare_exports import (
 from ...services.jobs import JobThread
 from ...services.state import AppState
 from ...services.theme import apply_theme_safe_styles
+from ..widgets.alphabet_bar import AlphabetBar
 
 
 class CompareTab(QWidget):
@@ -55,6 +59,7 @@ class CompareTab(QWidget):
         self.preview_payload: dict[str, Any] = {}
         self.current_run_id: str | None = None
         self.current_job: JobThread | None = None
+        self.alpha_bucket_filter: str | None = None
 
         self.workflow_label = QLabel(
             "Ce que fait cet atelier: compare la couverture, aligne A/B, puis calcule les différences phonologiques."
@@ -96,8 +101,12 @@ class CompareTab(QWidget):
         self.apply_btn.clicked.connect(self.apply_run)
 
         self.counters_label = QLabel("Union: 0 | Communs: 0 | Uniques A: 0 | Uniques B: 0")
+        self.alpha_bar = AlphabetBar(self)
+        self.alpha_bar.bucket_changed.connect(self._on_alpha_bucket_changed)
+        self.alpha_filter_label = QLabel("Lettre: Tout")
 
         self.preview_tabs = QTabWidget()
+        self.preview_tabs.currentChanged.connect(self._on_preview_tab_changed)
 
         self.coverage_filter = QComboBox()
         self.coverage_filter.addItem("Tous", "all")
@@ -247,6 +256,11 @@ class CompareTab(QWidget):
         center = QWidget()
         center_layout = QVBoxLayout()
         center_layout.addWidget(self.counters_label)
+        alpha_row = QHBoxLayout()
+        alpha_row.addWidget(QLabel("Navigation A–Z"))
+        alpha_row.addWidget(self.alpha_bar, 1)
+        alpha_row.addWidget(self.alpha_filter_label)
+        center_layout.addLayout(alpha_row)
         center_layout.addWidget(self.preview_tabs)
         center.setLayout(center_layout)
 
@@ -287,6 +301,87 @@ class CompareTab(QWidget):
 
     def _update_threshold_label(self, value: int) -> None:
         self.threshold_label.setText(str(value))
+
+    def _on_preview_tab_changed(self, _: int) -> None:
+        self._refresh_alphabet_bar()
+
+    def _active_preview_key(self) -> str:
+        index = self.preview_tabs.currentIndex()
+        if index == 1:
+            return "alignment"
+        if index == 2:
+            return "diff"
+        return "coverage"
+
+    def _active_letter_counts(self) -> dict[str, int]:
+        key = self._active_preview_key()
+        payload = self.preview_payload.get(key, {})
+        if isinstance(payload, dict):
+            counts = payload.get("letter_counts")
+            if isinstance(counts, dict):
+                parsed: dict[str, int] = {}
+                for bucket, count in counts.items():
+                    try:
+                        parsed[str(bucket)] = int(count)
+                    except (TypeError, ValueError):
+                        parsed[str(bucket)] = 0
+                return parsed
+
+        if not self.state.db_path or not self.current_run_id:
+            return {}
+        if key == "alignment":
+            return alignment_letter_counts(self.state.db_path, self.current_run_id)
+        if key == "diff":
+            return diff_letter_counts(self.state.db_path, self.current_run_id)
+        return coverage_letter_counts(self.state.db_path, self.current_run_id)
+
+    def _refresh_alphabet_bar(self) -> None:
+        self.alpha_bar.set_active_bucket(self.alpha_bucket_filter)
+        self.alpha_bar.set_counts(self._active_letter_counts())
+        self.alpha_filter_label.setText(f"Lettre: {self.alpha_bucket_filter or 'Tout'}")
+
+    def _on_alpha_bucket_changed(self, bucket: str) -> None:
+        cleaned = str(bucket or "").strip().upper()
+        self.alpha_bucket_filter = cleaned or None
+        self.alpha_filter_label.setText(f"Lettre: {self.alpha_bucket_filter or 'Tout'}")
+
+        if not self.state.db_path:
+            self._refresh_alphabet_bar()
+            return
+
+        if self.current_run_id:
+            try:
+                payload = load_compare_run_data(
+                    self.state.db_path,
+                    self.current_run_id,
+                    alpha_bucket=self.alpha_bucket_filter,
+                )
+            except CompareWorkflowError:
+                self._refresh_alphabet_bar()
+                return
+            run = payload.get("run", {})
+            self.preview_payload = {
+                "coverage": payload.get("coverage", {}),
+                "alignment": payload.get("alignment", {}),
+                "diff": payload.get("diff", {}),
+                "settings": {
+                    "key_field": run.get("key_field", "headword_norm_effective"),
+                    "mode": run.get("mode", "exact"),
+                    "fuzzy_threshold": run.get("fuzzy_threshold", 90),
+                    "algorithm": run.get("algorithm", "greedy"),
+                },
+                "corpus_ids": run.get("corpus_ids", []),
+                "corpus_a": "",
+                "corpus_b": "",
+            }
+            self._render_all_tables()
+            return
+
+        if self.preview_payload:
+            self.preview_run()
+            return
+
+        self._refresh_alphabet_bar()
 
     def _apply_corpus_filter(self) -> None:
         query = self.corpus_search.text().strip().lower()
@@ -334,6 +429,7 @@ class CompareTab(QWidget):
         self._apply_corpus_filter()
         self.refresh_history()
         self._update_next_step_state()
+        self._refresh_alphabet_bar()
 
     def preselect_corpora(self, corpus_ids: list[str]) -> None:
         wanted = set(corpus_ids)
@@ -408,6 +504,7 @@ class CompareTab(QWidget):
                 limit=2000,
                 filters={"mode": "all"},
                 key_field=settings["key_field"],
+                alpha_bucket=self.alpha_bucket_filter,
             )
             alignment = preview_alignment(
                 db_path=self.state.db_path,
@@ -418,6 +515,7 @@ class CompareTab(QWidget):
                 limit=2000,
                 key_field=settings["key_field"],
                 include_unmatched=True,
+                alpha_bucket=self.alpha_bucket_filter,
             )
             diff = preview_diff(
                 db_path=self.state.db_path,
@@ -428,6 +526,7 @@ class CompareTab(QWidget):
                 },
                 limit=2000,
                 filters={"mode": "all"},
+                alpha_bucket=self.alpha_bucket_filter,
             )
         except CompareWorkflowError as exc:
             QMessageBox.warning(self, "Comparer", str(exc))
@@ -476,7 +575,11 @@ class CompareTab(QWidget):
 
         if self.current_run_id and self.state.db_path:
             try:
-                loaded = load_compare_run_data(self.state.db_path, self.current_run_id)
+                loaded = load_compare_run_data(
+                    self.state.db_path,
+                    self.current_run_id,
+                    alpha_bucket=self.alpha_bucket_filter,
+                )
                 self.preview_payload = {
                     "coverage": loaded.get("coverage", {}),
                     "alignment": loaded.get("alignment", {}),
@@ -699,6 +802,7 @@ class CompareTab(QWidget):
         self._render_coverage_table()
         self._render_alignment_table()
         self._render_diff_table()
+        self._refresh_alphabet_bar()
 
     def refresh_history(self) -> None:
         if not self.state.db_path:
@@ -753,7 +857,11 @@ class CompareTab(QWidget):
             return
 
         try:
-            payload = load_compare_run_data(self.state.db_path, run_id)
+            payload = load_compare_run_data(
+                self.state.db_path,
+                run_id,
+                alpha_bucket=self.alpha_bucket_filter,
+            )
         except CompareWorkflowError:
             return
 

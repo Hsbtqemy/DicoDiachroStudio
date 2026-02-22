@@ -46,6 +46,7 @@ from dicodiachro.core.overrides import (
 from ...services.state import AppState
 from ...services.theme import apply_theme_safe_styles
 from ..dialogs.add_entry_dialog import AddEntryDialog
+from ..widgets.alphabet_bar import AlphabetBar
 
 
 class EntriesTab(QWidget):
@@ -59,6 +60,7 @@ class EntriesTab(QWidget):
         self.only_manual = False
         self.flags_only = False
         self.show_deleted = False
+        self.alpha_bucket_filter: str | None = None
         self.status_filters: set[str] = {"auto", "reviewed", "validated"}
         self.row_cache: list[dict[str, Any]] = []
         self.dirty_by_entry: dict[str, dict[str, Any]] = {}
@@ -97,6 +99,9 @@ class EntriesTab(QWidget):
         self.only_manual_check.toggled.connect(self.on_filter_manual)
         self.show_deleted_check = QCheckBox("Afficher supprimées")
         self.show_deleted_check.toggled.connect(self.on_toggle_show_deleted)
+        self.alpha_bar = AlphabetBar(self)
+        self.alpha_bar.bucket_changed.connect(self.on_alpha_bucket_changed)
+        self.alpha_filter_label = QLabel("Lettre: Tout")
 
         self.page_label = QLabel("page 1")
 
@@ -257,6 +262,8 @@ class EntriesTab(QWidget):
         filters_btn.setMenu(self.filters_menu)
         filters_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         toolbar_search.addWidget(filters_btn)
+        toolbar_search.addWidget(self.alpha_bar)
+        toolbar_search.addWidget(self.alpha_filter_label)
 
         toolbar_edit_structure = self._new_toolbar(
             "Curation edit structure", "curation_toolbar_edit_structure"
@@ -436,6 +443,13 @@ class EntriesTab(QWidget):
         self.offset = 0
         self.refresh()
 
+    def on_alpha_bucket_changed(self, bucket: str) -> None:
+        cleaned = str(bucket or "").strip().upper()
+        self.alpha_bucket_filter = cleaned or None
+        self.alpha_filter_label.setText(f"Lettre: {cleaned or 'Tout'}")
+        self.offset = 0
+        self.refresh()
+
     def prev_page(self) -> None:
         self.offset = max(0, self.offset - self.PAGE_SIZE)
         self.refresh()
@@ -448,7 +462,18 @@ class EntriesTab(QWidget):
         if not self.state.store or not self.state.active_dict_id:
             self.model.removeRows(0, self.model.rowCount())
             self.row_cache = []
+            self.alpha_bar.set_counts({})
+            self.alpha_bar.set_active_bucket(None)
+            self.alpha_filter_label.setText("Lettre: Tout")
             return
+
+        alpha_counts = self.state.store.alpha_counts(
+            self.state.active_dict_id,
+            include_deleted=self.show_deleted,
+        )
+        self.alpha_bar.set_active_bucket(self.alpha_bucket_filter)
+        self.alpha_bar.set_counts(alpha_counts)
+        self.alpha_filter_label.setText(f"Lettre: {self.alpha_bucket_filter or 'Tout'}")
 
         rows = self.state.store.list_entries(
             dict_id=self.state.active_dict_id,
@@ -456,6 +481,7 @@ class EntriesTab(QWidget):
             offset=self.offset,
             search=self.search_text or None,
             include_deleted=self.show_deleted,
+            alpha_bucket=self.alpha_bucket_filter,
         )
         rows_dict = [dict(row) for row in rows]
 

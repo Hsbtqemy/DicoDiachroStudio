@@ -62,11 +62,11 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
 
         file_menu = menu_bar.addMenu("Fichier")
-        file_menu.addAction("Nouveau projet", self._new_project)
-        file_menu.addAction("Ouvrir projet", self._open_project)
-        file_menu.addAction("Fermer projet", self._close_project)
+        file_menu.addAction("Nouveau projet", self.new_project_dialog)
+        file_menu.addAction("Ouvrir projet", self.open_project_dialog)
+        file_menu.addAction("Fermer projet", self.close_project_dialog)
         file_menu.addSeparator()
-        file_menu.addAction("Ouvrir dossier projet", self._open_project_folder)
+        file_menu.addAction("Ouvrir dossier projet", self.open_project_folder_dialog)
 
         project_menu = menu_bar.addMenu("Projet")
         project_menu.addAction("Gérer corpus", self.import_tab.manage_corpora)
@@ -106,6 +106,18 @@ class MainWindow(QMainWindow):
         if not self.state.project_dir:
             return
         open_directory(self.state.project_dir)
+
+    def new_project_dialog(self) -> None:
+        self._new_project()
+
+    def open_project_dialog(self) -> None:
+        self._open_project()
+
+    def close_project_dialog(self) -> None:
+        self._close_project()
+
+    def open_project_folder_dialog(self) -> None:
+        self._open_project_folder()
 
     def _show_diagnostics_dialog(self) -> None:
         dialog = QDialog(self)

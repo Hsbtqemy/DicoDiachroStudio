@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..models import Issue, ParsedEntry, ProfileApplied, ProfileSpec, ProjectPaths, utc_now_iso
-from ..utils.slug import unique_slug
+from ..utils import alpha_bucket_of, unique_slug
 
 PROJECT_MARKER = "dicodiachro.project.yml"
 
@@ -155,6 +155,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
             status TEXT DEFAULT 'auto',
             is_deleted INTEGER NOT NULL DEFAULT 0,
             manual_created INTEGER NOT NULL DEFAULT 0,
+            alpha_bucket TEXT,
             deleted_at TEXT,
             deleted_reason TEXT,
             source_id TEXT,
@@ -335,6 +336,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
         """
     )
     _ensure_entries_columns(conn)
+    _ensure_entries_indexes(conn)
     conn.commit()
 
 
@@ -368,6 +370,7 @@ def _ensure_entries_columns(conn: sqlite3.Connection) -> None:
         "status": "TEXT DEFAULT 'auto'",
         "is_deleted": "INTEGER DEFAULT 0",
         "manual_created": "INTEGER DEFAULT 0",
+        "alpha_bucket": "TEXT",
         "deleted_at": "TEXT",
         "deleted_reason": "TEXT",
         "source_id": "TEXT",
@@ -383,6 +386,48 @@ def _ensure_entries_columns(conn: sqlite3.Connection) -> None:
         conn.execute("UPDATE entries SET is_deleted=0 WHERE is_deleted IS NULL")
     if "manual_created" in existing_columns or "manual_created" in expected_columns:
         conn.execute("UPDATE entries SET manual_created=0 WHERE manual_created IS NULL")
+    rows_to_fix = conn.execute(
+        """
+        SELECT entry_id, dict_id, headword_raw, headword_edit, headword_norm
+        FROM entries
+        WHERE alpha_bucket IS NULL OR TRIM(alpha_bucket)=''
+        """
+    ).fetchall()
+    for row in rows_to_fix:
+        conn.execute(
+            "UPDATE entries SET alpha_bucket=? WHERE entry_id=? AND dict_id=?",
+            (
+                _compute_alpha_bucket(
+                    headword_raw=row["headword_raw"],
+                    headword_edit=row["headword_edit"],
+                    headword_norm=row["headword_norm"],
+                ),
+                row["entry_id"],
+                row["dict_id"],
+            ),
+        )
+
+
+def _ensure_entries_indexes(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entries_dict_alpha ON entries(dict_id, alpha_bucket)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entries_dict_alpha_norm ON entries(dict_id, alpha_bucket, headword_norm)"
+    )
+
+
+def _compute_alpha_bucket(
+    *,
+    headword_raw: str | None,
+    headword_edit: str | None = None,
+    headword_norm: str | None = None,
+) -> str:
+    normalized = str(headword_norm or "").strip()
+    edited = str(headword_edit or "").strip()
+    raw = str(headword_raw or "").strip()
+    seed = normalized or edited or raw
+    return alpha_bucket_of(seed)
 
 
 def entry_id_for(entry: ParsedEntry) -> str:
@@ -728,6 +773,7 @@ class SQLiteStore:
             for entry in entries:
                 eid = entry_id_for(entry)
                 applied = profile_results.get(eid)
+                alpha_bucket = _compute_alpha_bucket(headword_raw=entry.headword_raw)
                 rows.append(
                     (
                         eid,
@@ -765,6 +811,7 @@ class SQLiteStore:
                         None,
                         None,
                         "auto",
+                        alpha_bucket,
                         entry.source_id or entry.source_path,
                         entry.record_key,
                         entry.source_path,
@@ -772,7 +819,7 @@ class SQLiteStore:
                         utc_now_iso(),
                     )
                 )
-            placeholders = ",".join(["?"] * 36)
+            placeholders = ",".join(["?"] * 37)
             conn.executemany(
                 f"""
                 INSERT OR REPLACE INTO entries(
@@ -781,7 +828,7 @@ class SQLiteStore:
                   definition_raw, source_record, template_id, template_version, template_sha256,
                   form_display, form_norm, headword_norm, pron_norm, pron_render, features_json,
                   profile_id, profile_version, profile_sha256,
-                  headword_edit, pron_edit, definition_edit, status, source_id, record_key,
+                  headword_edit, pron_edit, definition_edit, status, alpha_bucket, source_id, record_key,
                   source_path, line_no, created_at
                 ) VALUES ({placeholders})
                 """,
@@ -833,6 +880,7 @@ class SQLiteStore:
             source_id_value = str(source_id or "").strip() or source_path_value
             record_key_value = str(record_key or "").strip() or None
             source_record_value = str(source_record or "").strip() or cleaned_headword
+            alpha_bucket = _compute_alpha_bucket(headword_raw=cleaned_headword)
 
             entry_id_payload = "|".join(
                 [
@@ -852,9 +900,9 @@ class SQLiteStore:
                 """
                 INSERT INTO entries(
                   entry_id, dict_id, section, syllables, headword_raw, pos_raw, pron_raw,
-                  definition_raw, source_record, status, is_deleted, manual_created,
+                  definition_raw, source_record, status, is_deleted, manual_created, alpha_bucket,
                   source_id, record_key, source_path, line_no, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     entry_id,
@@ -869,6 +917,7 @@ class SQLiteStore:
                     cleaned_status,
                     0,
                     1 if manual_created else 0,
+                    alpha_bucket,
                     source_id_value,
                     record_key_value,
                     source_path_value,
@@ -922,6 +971,7 @@ class SQLiteStore:
                   form_display=?,
                   form_norm=?,
                   headword_norm=?,
+                  alpha_bucket=?,
                   pron_norm=?,
                   pron_render=?,
                   features_json=?,
@@ -935,6 +985,11 @@ class SQLiteStore:
                         row["form_display"],
                         row["form_norm"],
                         row["headword_norm"],
+                        _compute_alpha_bucket(
+                            headword_raw=row.get("headword_raw"),
+                            headword_edit=row.get("headword_effective"),
+                            headword_norm=row.get("headword_norm"),
+                        ),
                         row["pron_norm"],
                         row["pron_render"],
                         row["features_json"],
@@ -968,6 +1023,28 @@ class SQLiteStore:
                 f"UPDATE entries SET {clauses} WHERE entry_id=? AND dict_id=?",
                 (*updates.values(), entry_id, dict_id),
             )
+            if "headword_edit" in updates:
+                row = conn.execute(
+                    """
+                    SELECT headword_raw, headword_edit, headword_norm
+                    FROM entries
+                    WHERE entry_id=? AND dict_id=?
+                    """,
+                    (entry_id, dict_id),
+                ).fetchone()
+                if row is not None:
+                    conn.execute(
+                        "UPDATE entries SET alpha_bucket=? WHERE entry_id=? AND dict_id=?",
+                        (
+                            _compute_alpha_bucket(
+                                headword_raw=row["headword_raw"],
+                                headword_edit=row["headword_edit"],
+                                headword_norm=row["headword_norm"],
+                            ),
+                            entry_id,
+                            dict_id,
+                        ),
+                    )
             conn.commit()
 
     def update_entry_raw_fields(
@@ -989,6 +1066,28 @@ class SQLiteStore:
                 f"UPDATE entries SET {clauses} WHERE entry_id=? AND dict_id=?",
                 (*updates.values(), entry_id, dict_id),
             )
+            if "headword_raw" in updates:
+                row = conn.execute(
+                    """
+                    SELECT headword_raw, headword_edit, headword_norm
+                    FROM entries
+                    WHERE entry_id=? AND dict_id=?
+                    """,
+                    (entry_id, dict_id),
+                ).fetchone()
+                if row is not None:
+                    conn.execute(
+                        "UPDATE entries SET alpha_bucket=? WHERE entry_id=? AND dict_id=?",
+                        (
+                            _compute_alpha_bucket(
+                                headword_raw=row["headword_raw"],
+                                headword_edit=row["headword_edit"],
+                                headword_norm=row["headword_norm"],
+                            ),
+                            entry_id,
+                            dict_id,
+                        ),
+                    )
             conn.commit()
 
     def update_entries_delete_state(
@@ -1166,12 +1265,19 @@ class SQLiteStore:
         offset: int = 0,
         search: str | None = None,
         include_deleted: bool = False,
+        alpha_bucket: str | None = None,
     ) -> list[sqlite3.Row]:
         deleted_filter = "" if include_deleted else " AND COALESCE(is_deleted, 0)=0"
+        bucket_filter = ""
+        params_prefix: list[Any] = [dict_id]
+        cleaned_bucket = str(alpha_bucket or "").strip().upper()
+        if cleaned_bucket:
+            bucket_filter = " AND alpha_bucket=?"
+            params_prefix.append(cleaned_bucket)
         with connect(self.db_path) as conn:
             if search:
                 query = (
-                    f"SELECT * FROM entries WHERE dict_id=?{deleted_filter} AND "
+                    f"SELECT * FROM entries WHERE dict_id=?{deleted_filter}{bucket_filter} AND "
                     "(headword_raw LIKE ? OR pron_raw LIKE ? OR definition_raw LIKE ? OR "
                     "headword_edit LIKE ? OR pron_edit LIKE ? OR definition_edit LIKE ? OR "
                     "form_display LIKE ? OR form_norm LIKE ? OR "
@@ -1182,7 +1288,7 @@ class SQLiteStore:
                 rows = conn.execute(
                     query,
                     (
-                        dict_id,
+                        *params_prefix,
                         needle,
                         needle,
                         needle,
@@ -1200,19 +1306,50 @@ class SQLiteStore:
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    f"SELECT * FROM entries WHERE dict_id=?{deleted_filter} ORDER BY section, line_no, entry_id LIMIT ? OFFSET ?",
-                    (dict_id, limit, offset),
+                    f"SELECT * FROM entries WHERE dict_id=?{deleted_filter}{bucket_filter} "
+                    "ORDER BY section, line_no, entry_id LIMIT ? OFFSET ?",
+                    (*params_prefix, limit, offset),
                 ).fetchall()
         return rows
 
-    def count_entries(self, dict_id: str, include_deleted: bool = False) -> int:
+    def count_entries(
+        self,
+        dict_id: str,
+        include_deleted: bool = False,
+        alpha_bucket: str | None = None,
+    ) -> int:
         deleted_filter = "" if include_deleted else " AND COALESCE(is_deleted, 0)=0"
+        params: list[Any] = [dict_id]
+        bucket_filter = ""
+        cleaned_bucket = str(alpha_bucket or "").strip().upper()
+        if cleaned_bucket:
+            bucket_filter = " AND alpha_bucket=?"
+            params.append(cleaned_bucket)
         with connect(self.db_path) as conn:
             row = conn.execute(
-                f"SELECT COUNT(*) AS n FROM entries WHERE dict_id=?{deleted_filter}",
-                (dict_id,),
+                f"SELECT COUNT(*) AS n FROM entries WHERE dict_id=?{deleted_filter}{bucket_filter}",
+                tuple(params),
             ).fetchone()
         return int(row["n"]) if row else 0
+
+    def alpha_counts(self, dict_id: str, include_deleted: bool = False) -> dict[str, int]:
+        deleted_filter = "" if include_deleted else " AND COALESCE(is_deleted, 0)=0"
+        with connect(self.db_path) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT alpha_bucket, COUNT(*) AS n
+                FROM entries
+                WHERE dict_id=?{deleted_filter}
+                GROUP BY alpha_bucket
+                """,
+                (dict_id,),
+            ).fetchall()
+
+        counts: dict[str, int] = {}
+        for row in rows:
+            bucket = str(row["alpha_bucket"] or "").strip().upper() or "#"
+            counts[bucket] = int(row["n"] or 0)
+        return counts
 
     def count_issues(self, dict_id: str | None = None) -> int:
         with connect(self.db_path) as conn:
@@ -1409,57 +1546,122 @@ class SQLiteStore:
             row = conn.execute("SELECT * FROM compare_runs WHERE run_id=?", (run_id,)).fetchone()
         return row
 
-    def compare_coverage_items(self, run_id: str) -> list[sqlite3.Row]:
+    @staticmethod
+    def _alpha_bucket_sql_expr(column: str) -> str:
+        trimmed = f"LTRIM(COALESCE({column}, ''))"
+        first_char = f"UPPER(SUBSTR({trimmed}, 1, 1))"
+        return f"CASE WHEN {first_char} BETWEEN 'A' AND 'Z' THEN {first_char} ELSE '#' END"
+
+    def compare_coverage_items(
+        self, run_id: str, alpha_bucket: str | None = None
+    ) -> list[sqlite3.Row]:
+        query = """
+            SELECT run_id, headword_key, corpus_id, present
+            FROM compare_coverage_items
+            WHERE run_id=?
+        """
+        params: list[Any] = [run_id]
+        cleaned_bucket = str(alpha_bucket or "").strip().upper()
+        if cleaned_bucket:
+            query += f" AND {self._alpha_bucket_sql_expr('headword_key')}=?"
+            params.append(cleaned_bucket)
+        query += " ORDER BY headword_key, corpus_id"
         with connect(self.db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT run_id, headword_key, corpus_id, present
-                FROM compare_coverage_items
-                WHERE run_id=?
-                ORDER BY headword_key, corpus_id
-                """,
-                (run_id,),
-            ).fetchall()
+            rows = conn.execute(query, tuple(params)).fetchall()
         return rows
 
     def compare_alignment_pairs(
-        self, run_id: str, include_unmatched: bool = True
+        self,
+        run_id: str,
+        include_unmatched: bool = True,
+        alpha_bucket: str | None = None,
     ) -> list[sqlite3.Row]:
+        cleaned_bucket = str(alpha_bucket or "").strip().upper()
+        alpha_filter = ""
+        params: list[Any] = [run_id]
+        if cleaned_bucket:
+            alpha_filter = f" AND {self._alpha_bucket_sql_expr('headword_key')}=?"
+            params.append(cleaned_bucket)
         with connect(self.db_path) as conn:
             if include_unmatched:
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT *
                     FROM compare_alignment_pairs
-                    WHERE run_id=?
+                    WHERE run_id=?{alpha_filter}
                     ORDER BY method='exact' DESC, score DESC, headword_key
                     """,
-                    (run_id,),
+                    tuple(params),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT *
                     FROM compare_alignment_pairs
-                    WHERE run_id=? AND entry_id_a IS NOT NULL AND entry_id_b IS NOT NULL
+                    WHERE run_id=?{alpha_filter} AND entry_id_a IS NOT NULL AND entry_id_b IS NOT NULL
                     ORDER BY method='exact' DESC, score DESC, headword_key
                     """,
-                    (run_id,),
+                    tuple(params),
                 ).fetchall()
         return rows
 
-    def compare_diff_rows(self, run_id: str) -> list[sqlite3.Row]:
+    def compare_diff_rows(self, run_id: str, alpha_bucket: str | None = None) -> list[sqlite3.Row]:
+        query = """
+            SELECT *
+            FROM compare_diff_rows
+            WHERE run_id=?
+        """
+        params: list[Any] = [run_id]
+        cleaned_bucket = str(alpha_bucket or "").strip().upper()
+        if cleaned_bucket:
+            query += f" AND {self._alpha_bucket_sql_expr('headword_key')}=?"
+            params.append(cleaned_bucket)
+        query += " ORDER BY headword_key"
+        with connect(self.db_path) as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+        return rows
+
+    def compare_coverage_letter_counts(self, run_id: str) -> dict[str, int]:
+        bucket_expr = self._alpha_bucket_sql_expr("headword_key")
         with connect(self.db_path) as conn:
             rows = conn.execute(
-                """
-                SELECT *
-                FROM compare_diff_rows
+                f"""
+                SELECT {bucket_expr} AS alpha_bucket, COUNT(DISTINCT headword_key) AS n
+                FROM compare_coverage_items
                 WHERE run_id=?
-                ORDER BY headword_key
+                GROUP BY alpha_bucket
                 """,
                 (run_id,),
             ).fetchall()
-        return rows
+        return {str(row["alpha_bucket"] or "#"): int(row["n"] or 0) for row in rows}
+
+    def compare_alignment_letter_counts(self, run_id: str) -> dict[str, int]:
+        bucket_expr = self._alpha_bucket_sql_expr("headword_key")
+        with connect(self.db_path) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {bucket_expr} AS alpha_bucket, COUNT(*) AS n
+                FROM compare_alignment_pairs
+                WHERE run_id=?
+                GROUP BY alpha_bucket
+                """,
+                (run_id,),
+            ).fetchall()
+        return {str(row["alpha_bucket"] or "#"): int(row["n"] or 0) for row in rows}
+
+    def compare_diff_letter_counts(self, run_id: str) -> dict[str, int]:
+        bucket_expr = self._alpha_bucket_sql_expr("headword_key")
+        with connect(self.db_path) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {bucket_expr} AS alpha_bucket, COUNT(*) AS n
+                FROM compare_diff_rows
+                WHERE run_id=?
+                GROUP BY alpha_bucket
+                """,
+                (run_id,),
+            ).fetchall()
+        return {str(row["alpha_bucket"] or "#"): int(row["n"] or 0) for row in rows}
 
     def save_comparison_session(self, config: dict[str, Any]) -> str:
         payload = json.dumps(config, ensure_ascii=False, sort_keys=True)
