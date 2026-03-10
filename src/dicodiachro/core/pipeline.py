@@ -27,6 +27,13 @@ from .qa import (
     validate_profile_applied,
     warn_s_vs_f,
 )
+from .source_filters import (
+    SourceFilterConfig,
+    SourceFilterValidationError,
+    apply_source_filters,
+    load_project_source_filters,
+    summarize_source_filter_reports,
+)
 from .storage.sqlite import SQLiteStore, append_jsonl_log, entry_id_for, init_project, project_paths
 
 
@@ -66,18 +73,20 @@ def _parse_source(
     path: Path,
     dict_id: str,
     parser: ResolvedParserPreset | None = None,
-) -> tuple[list[ParsedEntry], list[Issue], list[str]]:
+    source_filters: SourceFilterConfig | None = None,
+) -> tuple[list[ParsedEntry], list[Issue], list[str], dict[str, Any]]:
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    filtered = apply_source_filters(lines, source_path=path, config=source_filters)
     entries, parse_issues = parse_lines(
-        lines,
+        filtered.lines,
         dict_id=dict_id,
         source_path=str(path),
         parser_preset=parser.spec if parser else None,
         parser_sha256=parser.sha256 if parser else None,
     )
-    qa_issues = lint_lines(lines, dict_id=dict_id, source_path=str(path))
+    qa_issues = lint_lines(filtered.lines, dict_id=dict_id, source_path=str(path))
     qa_issues.extend(validate_entries(entries))
-    return entries, parse_issues + qa_issues, lines
+    return entries, parse_issues + qa_issues, filtered.lines, filtered.report
 
 
 def _resolve_s_vs_f(project_dir: Path) -> Path | None:
@@ -142,17 +151,30 @@ def run_pipeline(
         source_paths = discover_source_texts(paths.raw_dir)
     if not source_paths:
         raise PipelineError("No .txt sources found in project data/raw.")
+    try:
+        source_filters = load_project_source_filters(paths.rules_dir, dict_id=dict_id)
+    except SourceFilterValidationError as exc:
+        raise PipelineError(f"Invalid source filters configuration: {exc}") from exc
 
     all_entries: list[ParsedEntry] = []
     all_issues: list[Issue] = []
+    source_filter_reports: list[dict[str, Any]] = []
     symbols_inventory = load_symbols_inventory(paths.rules_dir, dict_id=dict_id)
 
     s_vs_f_path = _resolve_s_vs_f(project_dir)
     s_vs_f_lexicon = load_s_vs_f(s_vs_f_path) if s_vs_f_path else set()
     for source in source_paths:
-        entries, issues, _ = _parse_source(source, dict_id=dict_id, parser=resolved_parser)
+        entries, issues, _, filter_report = _parse_source(
+            source,
+            dict_id=dict_id,
+            parser=resolved_parser,
+            source_filters=source_filters,
+        )
         all_entries.extend(entries)
         all_issues.extend(issues)
+        source_filter_reports.append(filter_report)
+
+    source_filter_summary = summarize_source_filter_reports(source_filters, source_filter_reports)
 
     all_issues.extend(warn_s_vs_f(all_entries, dict_id=dict_id, lexicon=s_vs_f_lexicon))
     if extra_issues:
@@ -195,6 +217,7 @@ def run_pipeline(
         "sources": [str(path) for path in source_paths],
         "issues_csv": str(issues_csv),
         "profile_warnings": profile.validation_warnings,
+        "source_filters": source_filter_summary,
         "parser": (
             {
                 "parser_id": resolved_parser.spec.parser_id,
@@ -218,6 +241,7 @@ def run_pipeline(
             "action": "run_pipeline",
             "issues": len(all_issues),
             "sources": [str(path) for path in source_paths],
+            "source_filters": source_filter_summary,
             "parser": summary["parser"],
         },
     )

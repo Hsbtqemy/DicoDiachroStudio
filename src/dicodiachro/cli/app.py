@@ -913,14 +913,18 @@ def template_preview(
     init_project(project_dir)
     source_path = _resolve_template_source(project_dir, source, kind)
     params_dict = _parse_json_params(params)
-    preview = preview_template_on_source(
-        project_dir=project_dir,
-        source_path=source_path,
-        kind=kind,
-        params=params_dict,
-        corpus_id=corpus,
-        limit=limit,
-    )
+    try:
+        preview = preview_template_on_source(
+            project_dir=project_dir,
+            source_path=source_path,
+            kind=kind,
+            params=params_dict,
+            corpus_id=corpus,
+            limit=limit,
+        )
+    except PipelineError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
     preview["corpus_id"] = corpus
     preview["source_path"] = str(source_path)
     preview["kind"] = kind.value

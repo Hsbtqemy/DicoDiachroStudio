@@ -10,6 +10,11 @@ from ..overrides import (
     list_overrides,
 )
 from ..pipeline import PipelineError, apply_profile_to_entries
+from ..source_filters import (
+    SourceFilterValidationError,
+    load_project_source_filters,
+    summarize_source_filter_reports,
+)
 from ..storage.sqlite import SQLiteStore, init_project
 from .engine import apply_template_to_records, load_source_records, preview_template
 from .spec import TemplateKind, TemplateSpec, template_sha256
@@ -46,7 +51,18 @@ def preview_template_on_source(
 ) -> dict[str, Any]:
     paths = init_project(project_dir)
     store = SQLiteStore(paths.db_path)
-    records = load_source_records(source_path=source_path, limit=limit)
+    try:
+        source_filters = load_project_source_filters(paths.rules_dir, dict_id=corpus_id)
+    except SourceFilterValidationError as exc:
+        raise PipelineError(f"Invalid source filters configuration: {exc}") from exc
+
+    loaded = load_source_records(
+        source_path=source_path,
+        limit=limit,
+        source_filter_config=source_filters,
+        return_filter_report=True,
+    )
+    records, filter_report = loaded
     result = preview_template(kind=kind, params=params, records=records)
 
     rows = [
@@ -95,6 +111,10 @@ def preview_template_on_source(
         "unrecognized_count": unrecognized_count,
         "overridden_count": overridden_count,
         "issues_by_code": issues_by_code,
+        "source_filters": summarize_source_filter_reports(
+            source_filters,
+            [filter_report] if filter_report else [],
+        ),
         "rows": rows,
     }
 
@@ -111,7 +131,18 @@ def apply_template_to_corpus(
     store.ensure_dictionary(dict_id=corpus_id, label=corpus_id)
     entries_before = store.count_entries(corpus_id)
 
-    records = load_source_records(source_path=source_path, limit=None)
+    try:
+        source_filters = load_project_source_filters(paths.rules_dir, dict_id=corpus_id)
+    except SourceFilterValidationError as exc:
+        raise PipelineError(f"Invalid source filters configuration: {exc}") from exc
+
+    loaded = load_source_records(
+        source_path=source_path,
+        limit=None,
+        source_filter_config=source_filters,
+        return_filter_report=True,
+    )
+    records, filter_report = loaded
     applied = apply_template_to_records(template_spec.kind, template_spec.params, records)
     overrides = list_overrides(
         store=store,
@@ -242,6 +273,10 @@ def apply_template_to_corpus(
                     if row.issue_code
                 }.items()
             )
+        ),
+        "source_filters": summarize_source_filter_reports(
+            source_filters,
+            [filter_report] if filter_report else [],
         ),
         "issues_count": len(issues),
         "entries_before": entries_before,

@@ -65,6 +65,47 @@ def _group_words_by_line(words: list[dict], y_tolerance: float = 2.5) -> list[st
     ]
 
 
+def _equal_width_breakpoints(width: float, columns: int) -> list[float]:
+    return [width * idx / columns for idx in range(1, columns)]
+
+
+def _column_breakpoints(words: list[dict], *, width: float, columns: int) -> list[float]:
+    if columns <= 1:
+        return []
+
+    x_positions = sorted(
+        {
+            float(word.get("x0", 0.0))
+            for word in words
+            if str(word.get("text", "")).strip()
+        }
+    )
+    if len(x_positions) < columns:
+        return _equal_width_breakpoints(width, columns)
+
+    gaps = [
+        (x_positions[idx + 1] - x_positions[idx], idx)
+        for idx in range(len(x_positions) - 1)
+    ]
+    positive_gaps = [item for item in gaps if item[0] > 0.0]
+    if len(positive_gaps) < columns - 1:
+        return _equal_width_breakpoints(width, columns)
+
+    selected = sorted(positive_gaps, key=lambda item: item[0], reverse=True)[: columns - 1]
+    selected_indices = sorted(idx for _, idx in selected)
+    breakpoints = [(x_positions[idx] + x_positions[idx + 1]) / 2 for idx in selected_indices]
+    if len(breakpoints) != columns - 1:
+        return _equal_width_breakpoints(width, columns)
+    return breakpoints
+
+
+def _column_index(x0: float, breakpoints: list[float]) -> int:
+    for idx, threshold in enumerate(breakpoints):
+        if x0 < threshold:
+            return idx
+    return len(breakpoints)
+
+
 def _extract_page_lines(page, *, columns: int) -> list[str]:
     words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
     if not words:
@@ -72,14 +113,14 @@ def _extract_page_lines(page, *, columns: int) -> list[str]:
         return [line.strip() for line in text.splitlines() if line.strip()]
 
     width = max(float(page.width or 0.0), 1.0)
+    breakpoints = _column_breakpoints(words, width=width, columns=columns)
     column_words: list[list[dict]] = [[] for _ in range(columns)]
     for word in words:
         text = str(word.get("text", "")).strip()
         if not text:
             continue
         x0 = float(word.get("x0", 0.0))
-        ratio = min(max(x0 / width, 0.0), 0.999999)
-        index = min(int(ratio * columns), columns - 1)
+        index = _column_index(x0, breakpoints)
         column_words[index].append(word)
 
     lines: list[str] = []

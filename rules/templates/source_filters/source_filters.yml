@@ -1,0 +1,29 @@
+enabled: true
+
+default:
+  # Inclusive 1-based ranges to exclude from analysis.
+  exclude_line_ranges: []
+
+  # Drop everything before the first matching line (line itself is kept).
+  drop_before_regex: null
+
+  # Drop from the first matching line to EOF (line itself is dropped).
+  drop_after_regex: null
+
+  # Drop any line matching at least one pattern.
+  drop_line_regexes: []
+
+  # Regex matching mode for all patterns in this rule.
+  case_insensitive: true
+
+# Optional per-source overrides (glob on absolute path, project-relative path, or filename).
+sources: {}
+
+# Example:
+# sources:
+#   "*.txt":
+#     drop_before_regex: "^\\s*DICTIONARY\\s*$"
+#     drop_after_regex: "^\\s*(BIBLIOGRAPHY|INDEX)\\s*$"
+#     drop_line_regexes:
+#       - "^\\s*PREFACE\\s*$"
+#       - "^\\s*INTRODUCTION\\s*$"

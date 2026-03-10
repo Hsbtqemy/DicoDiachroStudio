@@ -69,6 +69,20 @@ Import tab now supports beginner-friendly local workflows:
 - URL import keeps a simple URL field and stores downloads automatically in the project.
 - Dropped TIFF/scan files are rejected with a clear message: run external OCR and re-export as PDF text.
 
+## Source paratext filtering
+
+- Use `rules/source_filters/source_filters.yml` to exclude front/back matter (preface, intro, bibliography, notes) from analysis.
+- Dictionary-specific override is supported with `rules/<dict_id>/source_filters.yml`.
+- Filters are applied automatically on text sources in:
+  - `dicodiachro run` (pipeline parse + QA + profile)
+  - Template workshop preview/apply (`template preview`, `template apply`, GUI Atelier)
+- Supported controls:
+  - `exclude_line_ranges` (1-based inclusive ranges, for example `1-120`)
+  - `drop_before_regex` (drop everything before first match)
+  - `drop_after_regex` (drop from first match to end)
+  - `drop_line_regexes` (drop matching lines only)
+- Run summaries now include a `source_filters` block with dropped/kept line counts, so you can verify filtering is really active.
+
 ## Template workshop (Atelier)
 
 - The `Atelier` tab provides a guided cycle: `Choisir gabarit -> Prévisualiser -> Appliquer -> Vérifier`.

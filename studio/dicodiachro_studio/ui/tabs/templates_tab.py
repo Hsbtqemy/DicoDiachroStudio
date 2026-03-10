@@ -7,6 +7,7 @@ from typing import Any
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -40,6 +41,7 @@ from dicodiachro.core.overrides import (
     list_overrides,
     upsert_override_record,
 )
+from dicodiachro.core.pipeline import PipelineError
 from dicodiachro.core.templates.csv_mapping import available_csv_columns
 from dicodiachro.core.templates.engine import TemplateEngineError, load_source_records
 from dicodiachro.core.templates.spec import TemplateKind, TemplateSpec
@@ -333,6 +335,8 @@ class TemplatesTab(QWidget):
         self.preview_table.horizontalHeader().setStretchLastSection(True)
         self.preview_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.preview_table.customContextMenuRequested.connect(self._show_preview_context_menu)
+        self.preview_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.preview_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
         self.apply_profile_check = QCheckBox("Appliquer conventions après extraction")
         self.apply_profile_check.setChecked(True)
@@ -426,6 +430,10 @@ class TemplatesTab(QWidget):
 
         preview_btn = QPushButton("Prévisualiser")
         preview_btn.clicked.connect(self.preview_template)
+        skip_selected_btn = QPushButton("Ignorer sélection")
+        skip_selected_btn.clicked.connect(self.skip_selected_preview_records)
+        clear_selected_btn = QPushButton("Annuler override sélection")
+        clear_selected_btn.clicked.connect(self.clear_selected_preview_overrides)
 
         apply_btn = QPushButton("Appliquer au corpus")
         apply_btn.clicked.connect(self.apply_template)
@@ -462,6 +470,8 @@ class TemplatesTab(QWidget):
         center_layout = QVBoxLayout()
         preview_top = QHBoxLayout()
         preview_top.addWidget(preview_btn)
+        preview_top.addWidget(skip_selected_btn)
+        preview_top.addWidget(clear_selected_btn)
         preview_top.addWidget(QLabel("Lignes"))
         preview_top.addWidget(self.preview_limit)
         preview_top.addWidget(self.diff_only)
@@ -757,7 +767,7 @@ class TemplatesTab(QWidget):
                 corpus_id=self.state.active_dict_id,
                 limit=self.preview_limit.value(),
             )
-        except (TemplateEngineError, ValueError) as exc:
+        except (TemplateEngineError, PipelineError, ValueError) as exc:
             QMessageBox.warning(self, "Prévisualisation impossible", str(exc))
             return
 
@@ -826,29 +836,154 @@ class TemplatesTab(QWidget):
             return None
         return self.visible_rows[row_idx]
 
+    def _selected_preview_payloads(self) -> list[dict[str, Any]]:
+        selected_rows: list[int] = []
+        selection_model = self.preview_table.selectionModel()
+        if selection_model is not None:
+            selected_rows = sorted({index.row() for index in selection_model.selectedRows()})
+        if not selected_rows:
+            current_row = self.preview_table.currentRow()
+            if current_row >= 0:
+                selected_rows = [current_row]
+
+        payloads: list[dict[str, Any]] = []
+        for row_idx in selected_rows:
+            if row_idx < 0 or row_idx >= len(self.visible_rows):
+                continue
+            payload = self.visible_rows[row_idx]
+            if isinstance(payload, dict):
+                payloads.append(payload)
+        return payloads
+
+    @staticmethod
+    def _selected_record_refs(payloads: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
+        refs: list[tuple[str, str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for payload in payloads:
+            source_id = str(payload.get("source_id") or "").strip()
+            record_key = str(payload.get("record_key") or "").strip()
+            if not source_id or not record_key:
+                continue
+            pair = (source_id, record_key)
+            if pair in seen:
+                continue
+            seen.add(pair)
+            refs.append((source_id, record_key, str(payload.get("source") or "")))
+        return refs
+
+    def _apply_skip_overrides_for_payloads(self, payloads: list[dict[str, Any]]) -> None:
+        if not self.state.store or not self.state.active_dict_id:
+            return
+        refs = self._selected_record_refs(payloads)
+        if not refs:
+            QMessageBox.information(self, "Override", "Aucune ligne source valide sélectionnée.")
+            return
+
+        for source_id, record_key, source_text in refs:
+            upsert_override_record(
+                store=self.state.store,
+                corpus_id=self.state.active_dict_id,
+                source_id=source_id,
+                record_key=record_key,
+                op="SKIP_RECORD",
+                before_json={"source": source_text},
+                after_json={"action": "skip"},
+            )
+
+        self.preview_template()
+        self.refresh_history()
+
+    def _clear_overrides_for_payloads(self, payloads: list[dict[str, Any]]) -> None:
+        if not self.state.store or not self.state.active_dict_id:
+            return
+        refs = self._selected_record_refs(payloads)
+        if not refs:
+            QMessageBox.information(self, "Override", "Aucune ligne source valide sélectionnée.")
+            return
+
+        for source_id, record_key, _ in refs:
+            delete_override(
+                store=self.state.store,
+                corpus_id=self.state.active_dict_id,
+                scope="record",
+                source_id=source_id,
+                record_key=record_key,
+            )
+
+        self.preview_template()
+        self.refresh_history()
+
+    def skip_selected_preview_records(self) -> None:
+        payloads = self._selected_preview_payloads()
+        if not payloads:
+            QMessageBox.information(
+                self,
+                "Override",
+                "Sélectionnez une ou plusieurs lignes dans la prévisualisation.",
+            )
+            return
+        try:
+            self._apply_skip_overrides_for_payloads(payloads)
+        except OverrideError as exc:
+            QMessageBox.warning(self, "Override", str(exc))
+
+    def clear_selected_preview_overrides(self) -> None:
+        payloads = self._selected_preview_payloads()
+        if not payloads:
+            QMessageBox.information(
+                self,
+                "Override",
+                "Sélectionnez une ou plusieurs lignes dans la prévisualisation.",
+            )
+            return
+        try:
+            self._clear_overrides_for_payloads(payloads)
+        except OverrideError as exc:
+            QMessageBox.warning(self, "Override", str(exc))
+
     def _show_preview_context_menu(self, pos: QPoint) -> None:
         index = self.preview_table.indexAt(pos)
         if index.isValid():
-            self.preview_table.selectRow(index.row())
-        payload = self._selected_preview_payload()
-        if payload is None or not self.state.store or not self.state.active_dict_id:
+            selection_model = self.preview_table.selectionModel()
+            if (
+                selection_model is None
+                or not selection_model.isRowSelected(index.row(), self.preview_table.rootIndex())
+            ):
+                self.preview_table.selectRow(index.row())
+        payloads = self._selected_preview_payloads()
+        if not payloads or not self.state.store or not self.state.active_dict_id:
             return
+        payload = payloads[0]
 
+        selected_record_count = len(self._selected_record_refs(payloads))
+        if selected_record_count <= 0:
+            return
         source_id = str(payload.get("source_id") or "")
         record_key = str(payload.get("record_key") or "")
-        if not source_id or not record_key:
+        if selected_record_count == 1 and (not source_id or not record_key):
             return
 
         menu = QMenu(self)
-        skip_action = menu.addAction("Ignorer cette ligne")
-        split_action = menu.addAction("Scinder (tokens...)")
-        edit_action = menu.addAction("Éditer les champs extraits")
+        if selected_record_count > 1:
+            skip_action = menu.addAction(f"Ignorer la sélection ({selected_record_count} lignes)")
+        else:
+            skip_action = menu.addAction("Ignorer cette ligne")
+        split_action = None
+        edit_action = None
         create_action = None
-        if str(payload.get("status") or "").strip() == "Non reconnu":
-            menu.addSeparator()
-            create_action = menu.addAction("Créer une entrée à partir de cette ligne…")
+        if selected_record_count == 1:
+            split_action = menu.addAction("Scinder (tokens...)")
+            edit_action = menu.addAction("Éditer les champs extraits")
+            if str(payload.get("status") or "").strip() == "Non reconnu":
+                menu.addSeparator()
+                create_action = menu.addAction("Créer une entrée à partir de cette ligne…")
         menu.addSeparator()
-        undo_action = menu.addAction("Annuler l'override")
+        if selected_record_count > 1:
+            undo_action = menu.addAction(
+                f"Annuler override sélection ({selected_record_count} lignes)"
+            )
+        else:
+            undo_action = menu.addAction("Annuler l'override")
 
         chosen = menu.exec(self.preview_table.viewport().mapToGlobal(pos))
         if not chosen:
@@ -856,16 +991,9 @@ class TemplatesTab(QWidget):
 
         try:
             if chosen == skip_action:
-                upsert_override_record(
-                    store=self.state.store,
-                    corpus_id=self.state.active_dict_id,
-                    source_id=source_id,
-                    record_key=record_key,
-                    op="SKIP_RECORD",
-                    before_json={"source": payload.get("source", "")},
-                    after_json={"action": "skip"},
-                )
-            elif chosen == split_action:
+                self._apply_skip_overrides_for_payloads(payloads)
+                return
+            elif split_action is not None and chosen == split_action:
                 default_seed = str(payload.get("source") or payload.get("headword_raw") or "")
                 dialog = SplitRecordDialog(default_seed, parent=self)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -883,7 +1011,7 @@ class TemplatesTab(QWidget):
                     before_json={"source": payload.get("source", "")},
                     after_json={"entries": entries},
                 )
-            elif chosen == edit_action:
+            elif edit_action is not None and chosen == edit_action:
                 dialog = ExtractedEditDialog(
                     headword=str(payload.get("headword_raw") or ""),
                     pron=str(payload.get("pron_raw") or ""),
@@ -954,13 +1082,8 @@ class TemplatesTab(QWidget):
                     self._open_curation_tab()
                 return
             elif chosen == undo_action:
-                delete_override(
-                    store=self.state.store,
-                    corpus_id=self.state.active_dict_id,
-                    scope="record",
-                    source_id=source_id,
-                    record_key=record_key,
-                )
+                self._clear_overrides_for_payloads(payloads)
+                return
         except OverrideError as exc:
             QMessageBox.warning(self, "Override", str(exc))
             return

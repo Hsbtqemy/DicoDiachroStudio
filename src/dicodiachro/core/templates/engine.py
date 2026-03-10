@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..overrides import compute_record_key
+from ..source_filters import SourceFilterConfig, apply_source_filters
 from .csv_mapping import split_cell
 from .spec import (
     EntryDraft,
@@ -30,7 +31,12 @@ def _compact_csv_row(row: dict[str, str], max_items: int = 6) -> str:
     return compact.strip()
 
 
-def load_source_records(source_path: Path, limit: int | None = None) -> list[SourceRecord]:
+def load_source_records(
+    source_path: Path,
+    limit: int | None = None,
+    source_filter_config: SourceFilterConfig | None = None,
+    return_filter_report: bool = False,
+) -> list[SourceRecord] | tuple[list[SourceRecord], dict[str, Any] | None]:
     path = source_path.expanduser().resolve()
     if not path.exists() or not path.is_file():
         raise TemplateEngineError(f"Source introuvable: {path}")
@@ -57,10 +63,16 @@ def load_source_records(source_path: Path, limit: int | None = None) -> list[Sou
                 )
                 if limit is not None and len(records) >= limit:
                     break
+        if return_filter_report:
+            return records, None
         return records
 
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    for idx, raw in enumerate(lines, start=1):
+    filtered = apply_source_filters(lines, source_path=path, config=source_filter_config)
+    dropped = set(filtered.dropped_line_numbers)
+    for idx, raw in enumerate(filtered.lines, start=1):
+        if idx in dropped:
+            continue
         records.append(
             SourceRecord(
                 source_id=source_id,
@@ -73,6 +85,8 @@ def load_source_records(source_path: Path, limit: int | None = None) -> list[Sou
         )
         if limit is not None and len(records) >= limit:
             break
+    if return_filter_report:
+        return records, filtered.report
     return records
 
 

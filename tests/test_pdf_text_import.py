@@ -32,6 +32,15 @@ def _write_three_column_pdf(path: Path) -> None:
     writer.save()
 
 
+def _write_two_column_sparse_x_pdf(path: Path) -> None:
+    writer = canvas.Canvas(str(path), pagesize=letter)
+    writer.drawString(72, 760, "L1")
+    writer.drawString(72, 740, "L2")
+    writer.drawString(250, 760, "R1")
+    writer.drawString(250, 740, "R2")
+    writer.save()
+
+
 def _write_shape_only_pdf(path: Path) -> None:
     writer = canvas.Canvas(str(path), pagesize=letter)
     writer.rect(72, 640, 220, 80, fill=1, stroke=0)
@@ -82,6 +91,18 @@ def test_pdf_text_import_three_columns_left_to_right(tmp_path: Path) -> None:
         "col3 one",
         "col3 two",
     ]
+
+
+def test_pdf_text_import_two_columns_with_sparse_x_positions(tmp_path: Path) -> None:
+    project_dir = tmp_path / "project"
+    init_project(project_dir)
+    pdf_path = tmp_path / "two-columns-sparse-x.pdf"
+    _write_two_column_sparse_x_pdf(pdf_path)
+
+    result = import_pdf_text(project_dir=project_dir, pdf_path=pdf_path, columns=2)
+    lines = result.output_text_paths[0].read_text(encoding="utf-8").splitlines()
+
+    assert lines[:4] == ["L1", "L2", "R1", "R2"]
 
 
 def test_pdf_text_import_no_text_layer_raises(tmp_path: Path) -> None:
