@@ -5,7 +5,7 @@
 L'atelier Comparer distingue trois niveaux:
 
 - **Couverture**: présence/absence par corpus sur une clé normalisée.
-- **Alignement**: correspondances A/B en exact puis fuzzy (greedy 1-to-1).
+- **Alignement**: correspondances A/B en exact puis fuzzy (`greedy` ou `mutual_best`).
 - **Diff phonologique**: comparaison de `pron_norm` / `pron_render` / `features` sur paires alignées.
 
 ## Recommandation de workflow
@@ -22,7 +22,7 @@ L'atelier Comparer distingue trois niveaux:
 - `key_field` (défaut: `headword_norm_effective`)
 - `mode`: `exact` ou `exact+fuzzy`
 - `fuzzy_threshold`: 70-95 (défaut 90)
-- `algorithm`: `greedy`
+- `algorithm`: `greedy` ou `mutual_best`
 
 ## Tables SQLite
 

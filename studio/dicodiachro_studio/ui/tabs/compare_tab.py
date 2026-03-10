@@ -93,6 +93,7 @@ class CompareTab(QWidget):
 
         self.strategy_combo = QComboBox()
         self.strategy_combo.addItem("Greedy 1-to-1", "greedy")
+        self.strategy_combo.addItem("Mutual best", "mutual_best")
 
         self.preview_btn = QPushButton("Prévisualiser")
         self.preview_btn.clicked.connect(self.preview_run)
@@ -516,6 +517,7 @@ class CompareTab(QWidget):
                 key_field=settings["key_field"],
                 include_unmatched=True,
                 alpha_bucket=self.alpha_bucket_filter,
+                algorithm=settings["algorithm"],
             )
             diff = preview_diff(
                 db_path=self.state.db_path,

@@ -13,12 +13,15 @@ from PySide6.QtWidgets import (
 
 from ..services.os_open import open_directory
 from ..services.state import AppState
+from .tabs.align_tab import AlignTab
 from .tabs.compare_tab import CompareTab
 from .tabs.conventions_tab import ConventionsTab
 from .tabs.diagnostics_tab import DiagnosticsTab
 from .tabs.entries_tab import EntriesTab
 from .tabs.export_tab import ExportTab
 from .tabs.import_tab import ImportTab
+from .tabs.profiles_tab import ProfilesTab
+from .tabs.project_tab import ProjectTab
 from .tabs.templates_tab import TemplatesTab
 
 
@@ -36,6 +39,9 @@ class MainWindow(QMainWindow):
         self.conventions_tab = ConventionsTab(self.state)
         self.compare_tab = CompareTab(self.state)
         self.export_tab = ExportTab(self.state)
+        self.align_tab = AlignTab(self.state)
+        self.profiles_tab = ProfilesTab(self.state)
+        self.project_tab = ProjectTab(self.state)
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self.import_tab, "Import")
@@ -44,6 +50,9 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.conventions_tab, "Conventions")
         self.tabs.addTab(self.compare_tab, "Comparer")
         self.tabs.addTab(self.export_tab, "Export")
+        self.tabs.addTab(self.align_tab, "Align avance")
+        self.tabs.addTab(self.profiles_tab, "Profils")
+        self.tabs.addTab(self.project_tab, "Projet")
 
         self.import_tab_index = self.tabs.indexOf(self.import_tab)
         self.templates_tab_index = self.tabs.indexOf(self.templates_tab)
@@ -140,6 +149,11 @@ class MainWindow(QMainWindow):
         reset = getattr(current, "reset_layout", None)
         if callable(reset):
             reset()
+            return
+        self.statusBar().showMessage(
+            "Aucune disposition a reinitialiser pour cet onglet.",
+            3000,
+        )
 
     def _open_compare_tab(self, corpus_ids: object) -> None:
         ids: list[str] = []
