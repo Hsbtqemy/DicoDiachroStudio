@@ -1,0 +1,128 @@
+group,command,function,function_line,parameter,param_kind,option_flags,required,default_expr,core_calls
+app,init,init,152,project_dir,arg,,yes,,init_project
+import_app,text,import_text,161,project_dir,arg,,yes,,init_project | import_text_batch | register_import_event
+import_app,text,import_text,161,input_path,arg,,yes,,init_project | import_text_batch | register_import_event
+import_app,text,import_text,161,patterns,arg,,yes,None,init_project | import_text_batch | register_import_event
+import_app,csv,import_csv,182,project_dir,arg,,yes,,init_project | import_csv_batch | register_import_event
+import_app,csv,import_csv,182,input_path,arg,,yes,,init_project | import_csv_batch | register_import_event
+import_app,csv,import_csv,182,patterns,arg,,yes,None,init_project | import_csv_batch | register_import_event
+import_app,merge,import_merge,203,project_dir,arg,,yes,,init_project | list_text_files | merge_text_files | register_import_event
+import_app,merge,import_merge,203,input_path,arg,,yes,,init_project | list_text_files | merge_text_files | register_import_event
+import_app,merge,import_merge,203,output_name,arg,,yes,'merged_results.txt',init_project | list_text_files | merge_text_files | register_import_event
+import_app,merge,import_merge,203,deduplicate,arg,,yes,True,init_project | list_text_files | merge_text_files | register_import_event
+import_app,pdf,import_pdf_text_cmd,228,project_dir,arg,,yes,,init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf,import_pdf_text_cmd,228,pdf_path,arg,,yes,,init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf,import_pdf_text_cmd,228,out,option,--out,no,"typer.Option(None, '--out', help='Optional output file or directory for extracted text.')",init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf,import_pdf_text_cmd,228,columns,option,--columns,no,"typer.Option(1, '--columns', min=1, max=3, help='Number of text columns to reconstruct (1..3).')",init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf,import_pdf_text_cmd,228,dict_id,option,--dict-id,no,"typer.Option(None, '--dict-id', help='Optional convenience mode: run pipeline after import.')",init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf,import_pdf_text_cmd,228,profile,option,--profile,no,"typer.Option('reading_v1', '--profile', help='Profile used only when --dict-id is provided.')",init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf,import_pdf_text_cmd,228,parser,option,--parser,no,"typer.Option(None, '--parser', help='Parser preset path/id used only when --dict-id is provided.')",init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf-text,import_pdf_text_cmd,228,project_dir,arg,,yes,,init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf-text,import_pdf_text_cmd,228,pdf_path,arg,,yes,,init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf-text,import_pdf_text_cmd,228,out,option,--out,no,"typer.Option(None, '--out', help='Optional output file or directory for extracted text.')",init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf-text,import_pdf_text_cmd,228,columns,option,--columns,no,"typer.Option(1, '--columns', min=1, max=3, help='Number of text columns to reconstruct (1..3).')",init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf-text,import_pdf_text_cmd,228,dict_id,option,--dict-id,no,"typer.Option(None, '--dict-id', help='Optional convenience mode: run pipeline after import.')",init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf-text,import_pdf_text_cmd,228,profile,option,--profile,no,"typer.Option('reading_v1', '--profile', help='Profile used only when --dict-id is provided.')",init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,pdf-text,import_pdf_text_cmd,228,parser,option,--parser,no,"typer.Option(None, '--parser', help='Parser preset path/id used only when --dict-id is provided.')",init_project | register_import_event | import_pdf_text | run_pipeline
+import_app,url,import_url,312,project_dir,arg,,yes,,init_project | import_from_share_link | register_import_event
+import_app,url,import_url,312,url,arg,,yes,,init_project | import_from_share_link | register_import_event
+import_app,nomenclature,import_nomenclature,332,project_dir,arg,,yes,,init_project | SQLiteStore | store.ensure_dictionary | store.insert_entries | register_import_event | import_entries_jsonl | import_entries_csv | ParsedEntry | ProfileApplied | entry_id_for
+import_app,nomenclature,import_nomenclature,332,input_file,arg,,yes,,init_project | SQLiteStore | store.ensure_dictionary | store.insert_entries | register_import_event | import_entries_jsonl | import_entries_csv | ParsedEntry | ProfileApplied | entry_id_for
+import_app,nomenclature,import_nomenclature,332,dict_id,option,--dict-id,yes,"typer.Option(..., '--dict-id')",init_project | SQLiteStore | store.ensure_dictionary | store.insert_entries | register_import_event | import_entries_jsonl | import_entries_csv | ParsedEntry | ProfileApplied | entry_id_for
+app,run,run,399,project_dir,arg,,yes,,run_pipeline
+app,run,run,399,dict_id,option,--dict-id,yes,"typer.Option(..., '--dict-id', help='Dictionary identifier.')",run_pipeline
+app,run,run,399,profile,option,--profile,no,"typer.Option('reading_v1', '--profile', help='Profile ID/file stem.')",run_pipeline
+app,run,run,399,parser,option,--parser,no,"typer.Option(None, '--parser', help='Parsing preset path or parser_id. Defaults to auto preset for dict_id.')",run_pipeline
+app,run,run,399,source,arg,,yes,None,run_pipeline
+parser_app,list,parser_list,430,project_dir,arg,,yes,,init_project | discover_presets | load_parser_preset | preset_sha256_from_path
+parser_app,list,parser_list,430,dict_id,option,--dict-id,yes,"typer.Option(..., '--dict-id')",init_project | discover_presets | load_parser_preset | preset_sha256_from_path
+parser_app,validate,parser_validate,456,parser_path,arg,,yes,,load_parser_preset | preset_sha256_from_path
+parser_app,validate,parser_validate,456,strict,option,--strict/--no-strict,no,"typer.Option(False, '--strict/--no-strict', help='Treat unknown keys as errors.')",load_parser_preset | preset_sha256_from_path
+app,apply-profile,apply_profile_cmd,488,project_dir,arg,,yes,,apply_profile_to_entries
+app,apply-profile,apply_profile_cmd,488,dict_id,option,--dict-id,yes,"typer.Option(..., '--dict-id')",apply_profile_to_entries
+app,apply-profile,apply_profile_cmd,488,profile,option,--profile,yes,"typer.Option(..., '--profile')",apply_profile_to_entries
+profile_app,validate,profile_validate,498,profile_path,arg,,yes,,load_profile | profile_sha256_from_path
+profile_app,validate,profile_validate,498,strict,option,--strict/--no-strict,no,"typer.Option(False, '--strict/--no-strict', help='Treat unknown keys as errors.')",load_profile | profile_sha256_from_path
+profile_app,preview,profile_preview,529,project_dir,arg,,yes,,preview_profile_entries
+profile_app,preview,profile_preview,529,dict_id,option,--dict-id,yes,"typer.Option(..., '--dict-id')",preview_profile_entries
+profile_app,preview,profile_preview,529,profile,option,--profile,yes,"typer.Option(..., '--profile')",preview_profile_entries
+profile_app,preview,profile_preview,529,limit,option,--limit,no,"typer.Option(50, '--limit', min=1, max=5000)",preview_profile_entries
+profile_app,preview,profile_preview,529,out,option,--out,no,"typer.Option(None, '--out', help='Optional CSV output path.')",preview_profile_entries
+profile_app,apply,profile_apply,592,project_dir,arg,,yes,,apply_profile_to_entries
+profile_app,apply,profile_apply,592,dict_id,option,--dict-id,yes,"typer.Option(..., '--dict-id')",apply_profile_to_entries
+profile_app,apply,profile_apply,592,profile,option,--profile,yes,"typer.Option(..., '--profile')",apply_profile_to_entries
+convention_app,list,convention_list,618,project_dir,arg,,yes,,init_project | SQLiteStore | store.list_convention_applications | load_profile | profile_sha256_from_path
+convention_app,list,convention_list,618,corpus,option,--corpus,yes,"typer.Option(..., '--corpus')",init_project | SQLiteStore | store.list_convention_applications | load_profile | profile_sha256_from_path
+convention_app,preview,convention_preview,663,project_dir,arg,,yes,,preview_convention
+convention_app,preview,convention_preview,663,corpus,option,--corpus,yes,"typer.Option(..., '--corpus')",preview_convention
+convention_app,preview,convention_preview,663,profile,option,--profile,yes,"typer.Option(..., '--profile')",preview_convention
+convention_app,preview,convention_preview,663,limit,option,--limit,no,"typer.Option(200, '--limit', min=1, max=5000)",preview_convention
+convention_app,preview,convention_preview,663,out,option,--out,no,"typer.Option(None, '--out', help='Optional CSV output.')",preview_convention
+convention_app,apply,convention_apply,719,project_dir,arg,,yes,,apply_convention
+convention_app,apply,convention_apply,719,corpus,option,--corpus,yes,"typer.Option(..., '--corpus')",apply_convention
+convention_app,apply,convention_apply,719,profile,option,--profile,yes,"typer.Option(..., '--profile')",apply_convention
+compare_app,preview,compare_preview,752,project_dir,arg,,yes,,init_project | preview_coverage | preview_alignment | preview_diff
+compare_app,preview,compare_preview,752,corpus,arg,,yes,,init_project | preview_coverage | preview_alignment | preview_diff
+compare_app,preview,compare_preview,752,corpus_a,option,--corpus-a,no,"typer.Option(None, '--corpus-a')",init_project | preview_coverage | preview_alignment | preview_diff
+compare_app,preview,compare_preview,752,corpus_b,option,--corpus-b,no,"typer.Option(None, '--corpus-b')",init_project | preview_coverage | preview_alignment | preview_diff
+compare_app,preview,compare_preview,752,mode,option,--mode,no,"typer.Option('exact+fuzzy', '--mode')",init_project | preview_coverage | preview_alignment | preview_diff
+compare_app,preview,compare_preview,752,threshold,option,--threshold,no,"typer.Option(90, '--threshold', min=70, max=95)",init_project | preview_coverage | preview_alignment | preview_diff
+compare_app,preview,compare_preview,752,key_field,option,--key-field,no,"typer.Option('headword_norm_effective', '--key-field')",init_project | preview_coverage | preview_alignment | preview_diff
+compare_app,preview,compare_preview,752,limit,option,--limit,no,"typer.Option(500, '--limit', min=1)",init_project | preview_coverage | preview_alignment | preview_diff
+compare_app,preview,compare_preview,752,coverage_filter,option,--coverage-filter,no,"typer.Option('all', '--coverage-filter')",init_project | preview_coverage | preview_alignment | preview_diff
+compare_app,preview,compare_preview,752,diff_filter,option,--diff-filter,no,"typer.Option('all', '--diff-filter')",init_project | preview_coverage | preview_alignment | preview_diff
+compare_app,preview,compare_preview,752,include_unmatched,option,--include-unmatched/--no-include-unmatched,no,"typer.Option(True, '--include-unmatched/--no-include-unmatched')",init_project | preview_coverage | preview_alignment | preview_diff
+compare_app,preview,compare_preview,752,algorithm,option,--algorithm,no,"typer.Option('greedy', '--algorithm', help='greedy|mutual_best')",init_project | preview_coverage | preview_alignment | preview_diff
+compare_app,apply,compare_apply,809,project_dir,arg,,yes,,init_project | apply_compare_run
+compare_app,apply,compare_apply,809,corpus,arg,,yes,,init_project | apply_compare_run
+compare_app,apply,compare_apply,809,corpus_a,option,--corpus-a,no,"typer.Option(None, '--corpus-a')",init_project | apply_compare_run
+compare_app,apply,compare_apply,809,corpus_b,option,--corpus-b,no,"typer.Option(None, '--corpus-b')",init_project | apply_compare_run
+compare_app,apply,compare_apply,809,mode,option,--mode,no,"typer.Option('exact+fuzzy', '--mode')",init_project | apply_compare_run
+compare_app,apply,compare_apply,809,threshold,option,--threshold,no,"typer.Option(90, '--threshold', min=70, max=95)",init_project | apply_compare_run
+compare_app,apply,compare_apply,809,key_field,option,--key-field,no,"typer.Option('headword_norm_effective', '--key-field')",init_project | apply_compare_run
+compare_app,apply,compare_apply,809,algorithm,option,--algorithm,no,"typer.Option('greedy', '--algorithm')",init_project | apply_compare_run
+compare_app,runs,compare_runs,841,project_dir,arg,,yes,,init_project | list_compare_runs
+compare_app,runs,compare_runs,841,limit,option,--limit,no,"typer.Option(30, '--limit', min=1)",init_project | list_compare_runs
+compare_app,export,compare_export,848,project_dir,arg,,yes,,init_project | SQLiteStore | load_compare_run_data | export_compare_coverage | export_compare_alignment | export_compare_diff
+compare_app,export,compare_export,848,run_id,option,--run-id,yes,"typer.Option(..., '--run-id')",init_project | SQLiteStore | load_compare_run_data | export_compare_coverage | export_compare_alignment | export_compare_diff
+compare_app,export,compare_export,848,kind,option,--kind,yes,"typer.Option(..., '--kind', help='coverage|alignment|diff')",init_project | SQLiteStore | load_compare_run_data | export_compare_coverage | export_compare_alignment | export_compare_diff
+compare_app,export,compare_export,848,out,option,--out,yes,"typer.Option(..., '--out')",init_project | SQLiteStore | load_compare_run_data | export_compare_coverage | export_compare_alignment | export_compare_diff
+template_app,sources,template_sources,882,project_dir,arg,,yes,,init_project | list_template_sources
+template_app,preview,template_preview,895,project_dir,arg,,yes,,init_project | preview_template_on_source
+template_app,preview,template_preview,895,corpus,option,--corpus,yes,"typer.Option(..., '--corpus')",init_project | preview_template_on_source
+template_app,preview,template_preview,895,kind,option,--kind,yes,"typer.Option(..., '--kind')",init_project | preview_template_on_source
+template_app,preview,template_preview,895,source,option,--source,no,"typer.Option(None, '--source', help='Optional source file path. Defaults to first matching imported source.')",init_project | preview_template_on_source
+template_app,preview,template_preview,895,params,option,--params,no,"typer.Option(None, '--params', help='JSON object with template parameters.')",init_project | preview_template_on_source
+template_app,preview,template_preview,895,limit,option,--limit,no,"typer.Option(200, '--limit', min=1, max=10000)",init_project | preview_template_on_source
+template_app,apply,template_apply,929,project_dir,arg,,yes,,init_project | TemplateSpec | apply_template_to_corpus
+template_app,apply,template_apply,929,corpus,option,--corpus,yes,"typer.Option(..., '--corpus')",init_project | TemplateSpec | apply_template_to_corpus
+template_app,apply,template_apply,929,kind,option,--kind,yes,"typer.Option(..., '--kind')",init_project | TemplateSpec | apply_template_to_corpus
+template_app,apply,template_apply,929,source,option,--source,no,"typer.Option(None, '--source', help='Optional source file path. Defaults to first matching imported source.')",init_project | TemplateSpec | apply_template_to_corpus
+template_app,apply,template_apply,929,params,option,--params,no,"typer.Option(None, '--params', help='JSON object with template parameters.')",init_project | TemplateSpec | apply_template_to_corpus
+template_app,apply,template_apply,929,template_id,option,--template-id,no,"typer.Option(None, '--template-id')",init_project | TemplateSpec | apply_template_to_corpus
+template_app,apply,template_apply,929,version,option,--version,no,"typer.Option(1, '--version', min=1)",init_project | TemplateSpec | apply_template_to_corpus
+template_app,apply,template_apply,929,apply_profile,option,--apply-profile,no,"typer.Option(None, '--apply-profile', help='Optional profile to apply immediately after template extraction.')",init_project | TemplateSpec | apply_template_to_corpus
+app,align,align_cmd,975,project_dir,arg,,yes,,project_paths | SQLiteStore | match_dictionaries | cluster_matches
+app,align,align_cmd,975,dict_a,option,--dict-a,yes,"typer.Option(..., '--dict-a')",project_paths | SQLiteStore | match_dictionaries | cluster_matches
+app,align,align_cmd,975,dict_b,option,--dict-b,yes,"typer.Option(..., '--dict-b')",project_paths | SQLiteStore | match_dictionaries | cluster_matches
+app,align,align_cmd,975,min_score,option,--min-score,no,"typer.Option(85.0, '--min-score')",project_paths | SQLiteStore | match_dictionaries | cluster_matches
+app,align,align_cmd,975,commit,option,--commit/--no-commit,no,"typer.Option(True, '--commit/--no-commit')",project_paths | SQLiteStore | match_dictionaries | cluster_matches
+export_app,entries,export_entries,999,project_dir,arg,,yes,,SQLiteStore | export_entries_jsonl | export_entries_csv | project_paths
+export_app,entries,export_entries,999,dict_id,option,--dict-id,yes,"typer.Option(..., '--dict-id')",SQLiteStore | export_entries_jsonl | export_entries_csv | project_paths
+export_app,entries,export_entries,999,fmt,option,--format,no,"typer.Option('csv', '--format', help='csv|jsonl')",SQLiteStore | export_entries_jsonl | export_entries_csv | project_paths
+export_app,entries,export_entries,999,out,option,--out,no,"typer.Option(None, '--out')",SQLiteStore | export_entries_jsonl | export_entries_csv | project_paths
+export_app,compare,export_compare,1018,project_dir,arg,,yes,,project_paths | SQLiteStore | export_comparison_xlsx | export_comparison_docx
+export_app,compare,export_compare,1018,dict_ids,arg,,yes,,project_paths | SQLiteStore | export_comparison_xlsx | export_comparison_docx
+export_app,compare,export_compare,1018,xlsx_out,option,--xlsx,no,"typer.Option(None, '--xlsx')",project_paths | SQLiteStore | export_comparison_xlsx | export_comparison_docx
+export_app,compare,export_compare,1018,docx_out,option,--docx,no,"typer.Option(None, '--docx')",project_paths | SQLiteStore | export_comparison_xlsx | export_comparison_docx
+app,diagnostics,diagnostics,1037,project_dir,arg,,yes,,SQLiteStore | store.count_issues | project_paths | store.count_entries | store.top_issues
+app,diagnostics,diagnostics,1037,dict_id,option,--dict-id,no,"typer.Option(None, '--dict-id')",SQLiteStore | store.count_issues | project_paths | store.count_entries | store.top_issues
+filter_app,accent,filter_accent,1048,project_dir,option,--project,no,"typer.Option(None, '--project')",filter_by_accents
+filter_app,accent,filter_accent,1048,dict_id,option,--dict-id,no,"typer.Option(None, '--dict-id')",filter_by_accents
+filter_app,accent,filter_accent,1048,csv_path,option,--csv,no,"typer.Option(None, '--csv')",filter_by_accents
+filter_app,syllables,filter_syllables,1068,project_dir,arg,,yes,,filter_by_syllables
+filter_app,syllables,filter_syllables,1068,dict_id,arg,,yes,,filter_by_syllables
+filter_app,syllables,filter_syllables,1068,value,arg,,yes,,filter_by_syllables
+filter_app,startswith,filter_startswith,1081,project_dir,arg,,yes,,filter_by_prefix
+filter_app,startswith,filter_startswith,1081,dict_id,arg,,yes,,filter_by_prefix
+filter_app,startswith,filter_startswith,1081,prefixes,arg,,yes,,filter_by_prefix
