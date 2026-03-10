@@ -1266,50 +1266,78 @@ class SQLiteStore:
         search: str | None = None,
         include_deleted: bool = False,
         alpha_bucket: str | None = None,
+        status_filters: set[str] | None = None,
+        manual_only: bool = False,
+        flags_only: bool = False,
     ) -> list[sqlite3.Row]:
-        deleted_filter = "" if include_deleted else " AND COALESCE(is_deleted, 0)=0"
-        bucket_filter = ""
-        params_prefix: list[Any] = [dict_id]
+        where_parts = ["dict_id=?"]
+        params: list[Any] = [dict_id]
+
+        if not include_deleted:
+            where_parts.append("COALESCE(is_deleted, 0)=0")
+
         cleaned_bucket = str(alpha_bucket or "").strip().upper()
         if cleaned_bucket:
-            bucket_filter = " AND alpha_bucket=?"
-            params_prefix.append(cleaned_bucket)
+            where_parts.append("alpha_bucket=?")
+            params.append(cleaned_bucket)
+
+        if status_filters is not None:
+            allowed_statuses = {"auto", "reviewed", "validated"}
+            selected_statuses = sorted(
+                {
+                    str(status).strip().lower()
+                    for status in status_filters
+                    if str(status).strip().lower() in allowed_statuses
+                }
+            )
+            if not selected_statuses:
+                return []
+            placeholders = ",".join(["?"] * len(selected_statuses))
+            where_parts.append(f"COALESCE(status, 'auto') IN ({placeholders})")
+            params.extend(selected_statuses)
+
+        if manual_only:
+            where_parts.append(
+                "("
+                "COALESCE(manual_created, 0)=1 OR "
+                "NULLIF(TRIM(COALESCE(headword_edit, '')), '') IS NOT NULL OR "
+                "NULLIF(TRIM(COALESCE(pron_edit, '')), '') IS NOT NULL OR "
+                "NULLIF(TRIM(COALESCE(definition_edit, '')), '') IS NOT NULL OR "
+                "COALESCE(status, 'auto')!='auto'"
+                ")"
+            )
+
+        if flags_only:
+            where_parts.append(
+                "EXISTS ("
+                "SELECT 1 FROM issues "
+                "WHERE issues.dict_id=entries.dict_id "
+                "AND issues.source_path=entries.source_path "
+                "AND issues.line_no=entries.line_no"
+                ")"
+            )
+
+        if search:
+            where_parts.append(
+                "("
+                "headword_raw LIKE ? OR pron_raw LIKE ? OR definition_raw LIKE ? OR "
+                "headword_edit LIKE ? OR pron_edit LIKE ? OR definition_edit LIKE ? OR "
+                "form_display LIKE ? OR form_norm LIKE ? OR "
+                "headword_norm LIKE ? OR pron_norm LIKE ? OR pron_render LIKE ?"
+                ")"
+            )
+            needle = f"%{search}%"
+            params.extend([needle] * 11)
+
+        where_sql = " AND ".join(where_parts)
+        query = (
+            f"SELECT * FROM entries WHERE {where_sql} "
+            "ORDER BY section, line_no, entry_id LIMIT ? OFFSET ?"
+        )
+        params.extend([limit, offset])
+
         with connect(self.db_path) as conn:
-            if search:
-                query = (
-                    f"SELECT * FROM entries WHERE dict_id=?{deleted_filter}{bucket_filter} AND "
-                    "(headword_raw LIKE ? OR pron_raw LIKE ? OR definition_raw LIKE ? OR "
-                    "headword_edit LIKE ? OR pron_edit LIKE ? OR definition_edit LIKE ? OR "
-                    "form_display LIKE ? OR form_norm LIKE ? OR "
-                    "headword_norm LIKE ? OR pron_norm LIKE ? OR pron_render LIKE ?) "
-                    "ORDER BY section, line_no, entry_id LIMIT ? OFFSET ?"
-                )
-                needle = f"%{search}%"
-                rows = conn.execute(
-                    query,
-                    (
-                        *params_prefix,
-                        needle,
-                        needle,
-                        needle,
-                        needle,
-                        needle,
-                        needle,
-                        needle,
-                        needle,
-                        needle,
-                        needle,
-                        needle,
-                        limit,
-                        offset,
-                    ),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    f"SELECT * FROM entries WHERE dict_id=?{deleted_filter}{bucket_filter} "
-                    "ORDER BY section, line_no, entry_id LIMIT ? OFFSET ?",
-                    (*params_prefix, limit, offset),
-                ).fetchall()
+            rows = conn.execute(query, tuple(params)).fetchall()
         return rows
 
     def count_entries(

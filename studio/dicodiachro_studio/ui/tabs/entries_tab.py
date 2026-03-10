@@ -86,6 +86,9 @@ class EntriesTab(QWidget):
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.table.clicked.connect(self.on_row_selected)
+        selection_model = self.table.selectionModel()
+        if selection_model is not None:
+            selection_model.selectionChanged.connect(lambda *_: self.on_row_selected())
         self.model.itemChanged.connect(self.on_item_changed)
 
         self.details = QTextEdit()
@@ -482,6 +485,9 @@ class EntriesTab(QWidget):
             search=self.search_text or None,
             include_deleted=self.show_deleted,
             alpha_bucket=self.alpha_bucket_filter,
+            status_filters=self.status_filters,
+            manual_only=self.only_manual,
+            flags_only=self.flags_only,
         )
         rows_dict = [dict(row) for row in rows]
 
@@ -491,25 +497,14 @@ class EntriesTab(QWidget):
             _, issues = self.state.store.entry_details(entry_id)
             issues_count_by_entry[entry_id] = len(issues)
 
-        filtered_rows: list[dict[str, Any]] = []
-        for row in rows_dict:
-            if self.only_manual and not self._is_manual(row):
-                continue
-            status = str(row.get("status") or "auto")
-            if status not in self.status_filters:
-                continue
-            if self.flags_only and issues_count_by_entry.get(str(row["entry_id"]), 0) == 0:
-                continue
-            filtered_rows.append(row)
-
-        self.row_cache = filtered_rows
+        self.row_cache = rows_dict
         self.dirty_by_entry.clear()
 
         self._loading_model = True
         self.model.removeRows(0, self.model.rowCount())
         trash_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon)
         deleted_foreground = QBrush(self.palette().color(QPalette.ColorRole.Mid))
-        for row in filtered_rows:
+        for row in self.row_cache:
             entry_id = str(row["entry_id"])
             issues_count = issues_count_by_entry.get(entry_id, 0)
             headword = self._effective(row, "headword")
