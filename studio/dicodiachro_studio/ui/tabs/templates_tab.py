@@ -306,6 +306,7 @@ class TemplatesTab(QWidget):
         self.preview_limit.setRange(1, 5000)
         self.preview_limit.setValue(200)
         self.diff_only = QCheckBox("Diff view")
+        self.diff_only.toggled.connect(lambda _: self._rerender_preview())
 
         self.records_count_label = QLabel("Records analysés: 0")
         self.entries_count_label = QLabel("Entrées produites: 0")
@@ -762,6 +763,10 @@ class TemplatesTab(QWidget):
 
         self.preview_payload = preview
         self._render_preview(preview)
+
+    def _rerender_preview(self) -> None:
+        if self.preview_payload:
+            self._render_preview(self.preview_payload)
 
     def _render_preview(self, payload: dict[str, object]) -> None:
         rows = payload.get("rows", [])

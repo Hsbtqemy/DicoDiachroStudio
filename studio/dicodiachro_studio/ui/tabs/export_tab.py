@@ -71,16 +71,35 @@ class ExportTab(QWidget):
             return [row["dict_id"] for row in self.state.list_dictionaries()]
         return [part.strip() for part in raw.split(",") if part.strip()]
 
+    def _default_export_path(self, filename: str) -> str:
+        if not self.state.project_dir:
+            return filename
+        return str(project_paths(self.state.project_dir).derived_dir / filename)
+
+    def _resolve_output_path(self, selected_path: str) -> Path:
+        target = Path(selected_path).expanduser()
+        if target.is_absolute():
+            return target
+        if not self.state.project_dir:
+            return target
+        return project_paths(self.state.project_dir).derived_dir / target
+
     def export_csv(self) -> None:
         if not self._require():
             return
-        out, _ = QFileDialog.getSaveFileName(self, "Export CSV", "entries.csv", "CSV (*.csv)")
+        out, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export CSV",
+            self._default_export_path("entries.csv"),
+            "CSV (*.csv)",
+        )
         if not out:
             return
+        target = self._resolve_output_path(out)
         path = export_entries_csv(
             self.state.store,
             self.state.active_dict_id,
-            project_paths(self.state.project_dir).derived_dir / Path(out).name,
+            target,
         )
         QMessageBox.information(self, "Exported", str(path))
 
@@ -88,14 +107,18 @@ class ExportTab(QWidget):
         if not self._require():
             return
         out, _ = QFileDialog.getSaveFileName(
-            self, "Export JSONL", "entries.jsonl", "JSONL (*.jsonl)"
+            self,
+            "Export JSONL",
+            self._default_export_path("entries.jsonl"),
+            "JSONL (*.jsonl)",
         )
         if not out:
             return
+        target = self._resolve_output_path(out)
         path = export_entries_jsonl(
             self.state.store,
             self.state.active_dict_id,
-            project_paths(self.state.project_dir).derived_dir / Path(out).name,
+            target,
         )
         QMessageBox.information(self, "Exported", str(path))
 
@@ -103,15 +126,19 @@ class ExportTab(QWidget):
         if not self._require():
             return
         out, _ = QFileDialog.getSaveFileName(
-            self, "Export XLSX", "comparison.xlsx", "XLSX (*.xlsx)"
+            self,
+            "Export XLSX",
+            self._default_export_path("comparison.xlsx"),
+            "XLSX (*.xlsx)",
         )
         if not out:
             return
         dict_ids = self._dict_ids()
+        target = self._resolve_output_path(out)
         path = export_comparison_xlsx(
             self.state.store,
             dict_ids,
-            project_paths(self.state.project_dir).derived_dir / Path(out).name,
+            target,
         )
         QMessageBox.information(self, "Exported", str(path))
 
@@ -119,15 +146,19 @@ class ExportTab(QWidget):
         if not self._require():
             return
         out, _ = QFileDialog.getSaveFileName(
-            self, "Export DOCX", "comparison.docx", "DOCX (*.docx)"
+            self,
+            "Export DOCX",
+            self._default_export_path("comparison.docx"),
+            "DOCX (*.docx)",
         )
         if not out:
             return
         dict_ids = self._dict_ids()
+        target = self._resolve_output_path(out)
         path = export_comparison_docx(
             self.state.store,
             dict_ids,
-            project_paths(self.state.project_dir).derived_dir / Path(out).name,
+            target,
         )
         QMessageBox.information(self, "Exported", str(path))
 
@@ -135,7 +166,10 @@ class ExportTab(QWidget):
         if not self._require():
             return
         out, _ = QFileDialog.getSaveFileName(
-            self, "Export session JSON", "session.json", "JSON (*.json)"
+            self,
+            "Export session JSON",
+            self._default_export_path("session.json"),
+            "JSON (*.json)",
         )
         if not out:
             return
@@ -146,7 +180,8 @@ class ExportTab(QWidget):
             "dict_ids": dict_ids,
         }
         session_id = self.state.store.save_comparison_session(session)
-        target = project_paths(self.state.project_dir).derived_dir / Path(out).name
+        target = self._resolve_output_path(out)
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
             json.dumps({"session_id": session_id, **session}, ensure_ascii=False, indent=2),
             encoding="utf-8",
