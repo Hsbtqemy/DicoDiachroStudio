@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz
 
 from ..storage.sqlite import SQLiteStore
 from ..utils import alpha_bucket_of
 
 SPACE_RE = re.compile(r"\s+")
+SUPPORTED_ALIGNMENT_ALGORITHMS = {"greedy", "mutual_best"}
 
 
 class CompareWorkflowError(RuntimeError):
@@ -143,6 +144,14 @@ def _coverage_filter(
         return in_b and not in_a
 
     return True
+
+
+def _normalize_alignment_algorithm(algorithm: str | None) -> str:
+    clean_algorithm = str(algorithm or "greedy").strip().lower()
+    if clean_algorithm not in SUPPORTED_ALIGNMENT_ALGORITHMS:
+        allowed = ", ".join(sorted(SUPPORTED_ALIGNMENT_ALGORITHMS))
+        raise CompareWorkflowError(f"algorithm must be one of: {allowed}")
+    return clean_algorithm
 
 
 def preview_coverage(
@@ -288,22 +297,111 @@ def _alignment_rows_fuzzy(
     matched_a: set[str],
     matched_b: set[str],
     threshold: int,
+    algorithm: str,
 ) -> tuple[list[dict[str, Any]], set[str], set[str]]:
+    clean_algorithm = _normalize_alignment_algorithm(algorithm)
     rows: list[dict[str, Any]] = []
+    remaining_a = sorted([key for key in index_a.keys() if key not in matched_a])
     remaining_b = sorted([key for key in index_b.keys() if key not in matched_b])
-    taken_b: set[str] = set()
 
-    for key_a in sorted([key for key in index_a.keys() if key not in matched_a]):
-        choices = [key for key in remaining_b if key not in taken_b]
-        if not choices:
+    if clean_algorithm == "greedy":
+        taken_b: set[str] = set()
+        for key_a in remaining_a:
+            choices = [key for key in remaining_b if key not in taken_b]
+            if not choices:
+                continue
+
+            best_key_b: str | None = None
+            best_score: float = -1.0
+            for key_b in choices:
+                score = float(fuzz.ratio(key_a, key_b))
+                if (
+                    score > best_score
+                    or (
+                        score == best_score
+                        and best_key_b is not None
+                        and key_b < best_key_b
+                    )
+                    or (score == best_score and best_key_b is None)
+                ):
+                    best_key_b = key_b
+                    best_score = score
+
+            if best_key_b is None or int(best_score) < int(threshold):
+                continue
+
+            row_a = index_a[key_a]
+            row_b = index_b[best_key_b]
+            rows.append(
+                {
+                    "corpus_a": corpus_a,
+                    "corpus_b": corpus_b,
+                    "headword_key": key_a,
+                    "entry_id_a": row_a.get("entry_id"),
+                    "entry_id_b": row_b.get("entry_id"),
+                    "headword_a": _effective(row_a, "headword"),
+                    "headword_b": _effective(row_b, "headword"),
+                    "headword_norm_a": key_a,
+                    "headword_norm_b": best_key_b,
+                    "status_a": row_a.get("status") or "auto",
+                    "status_b": row_b.get("status") or "auto",
+                    "score": best_score,
+                    "method": "fuzzy",
+                    "reason": "",
+                }
+            )
+            matched_a.add(key_a)
+            matched_b.add(best_key_b)
+            taken_b.add(best_key_b)
+        return rows, matched_a, matched_b
+
+    best_b_for_a: dict[str, tuple[str, float]] = {}
+    for key_a in remaining_a:
+        best_key_b: str | None = None
+        best_score: float = -1.0
+        for key_b in remaining_b:
+            score = float(fuzz.ratio(key_a, key_b))
+            if (
+                score > best_score
+                or (
+                    score == best_score
+                    and best_key_b is not None
+                    and key_b < best_key_b
+                )
+                or (score == best_score and best_key_b is None)
+            ):
+                best_key_b = key_b
+                best_score = score
+        if best_key_b is not None and int(best_score) >= int(threshold):
+            best_b_for_a[key_a] = (best_key_b, best_score)
+
+    best_a_for_b: dict[str, tuple[str, float]] = {}
+    for key_b in remaining_b:
+        best_key_a: str | None = None
+        best_score: float = -1.0
+        for key_a in remaining_a:
+            score = float(fuzz.ratio(key_b, key_a))
+            if (
+                score > best_score
+                or (
+                    score == best_score
+                    and best_key_a is not None
+                    and key_a < best_key_a
+                )
+                or (score == best_score and best_key_a is None)
+            ):
+                best_key_a = key_a
+                best_score = score
+        if best_key_a is not None and int(best_score) >= int(threshold):
+            best_a_for_b[key_b] = (best_key_a, best_score)
+
+    for key_a in remaining_a:
+        pair = best_b_for_a.get(key_a)
+        if pair is None:
             continue
-
-        best = process.extractOne(key_a, choices, scorer=fuzz.ratio)
-        if not best:
-            continue
-
-        key_b, score, _ = best
-        if int(score) < int(threshold):
+        key_b, score = pair
+        reciprocal = best_a_for_b.get(key_b)
+        if reciprocal is None or reciprocal[0] != key_a:
             continue
 
         row_a = index_a[key_a]
@@ -321,14 +419,13 @@ def _alignment_rows_fuzzy(
                 "headword_norm_b": key_b,
                 "status_a": row_a.get("status") or "auto",
                 "status_b": row_b.get("status") or "auto",
-                "score": float(score),
+                "score": score,
                 "method": "fuzzy",
                 "reason": "",
             }
         )
         matched_a.add(key_a)
         matched_b.add(key_b)
-        taken_b.add(key_b)
 
     return rows, matched_a, matched_b
 
@@ -399,6 +496,7 @@ def preview_alignment(
     key_field: str = "headword_norm_effective",
     include_unmatched: bool = True,
     alpha_bucket: str | None = None,
+    algorithm: str = "greedy",
 ) -> dict[str, Any]:
     if corpus_a == corpus_b:
         raise CompareWorkflowError("Corpus A and B must be different.")
@@ -406,6 +504,7 @@ def preview_alignment(
     clean_mode = mode.strip().lower()
     if clean_mode not in {"exact", "exact+fuzzy", "fuzzy"}:
         raise CompareWorkflowError("mode must be one of: exact, exact+fuzzy, fuzzy")
+    clean_algorithm = _normalize_alignment_algorithm(algorithm)
 
     store = SQLiteStore(db_path)
     rows_a = [dict(row) for row in store.entries_for_dict(corpus_a)]
@@ -431,6 +530,7 @@ def preview_alignment(
             matched_a=matched_a,
             matched_b=matched_b,
             threshold=int(threshold),
+            algorithm=clean_algorithm,
         )
 
     unmatched_rows: list[dict[str, Any]] = []
@@ -464,6 +564,7 @@ def preview_alignment(
         "mode": clean_mode,
         "threshold": int(threshold),
         "key_field": key_field,
+        "algorithm": clean_algorithm,
         "include_unmatched": include_unmatched,
         "alpha_bucket": cleaned_bucket or None,
         "letter_counts": letter_counts,
@@ -601,6 +702,7 @@ def preview_diff(
             key_field=str(run_settings.get("key_field", "headword_norm_effective")),
             include_unmatched=False,
             alpha_bucket=alpha_bucket,
+            algorithm=str(run_settings.get("algorithm", "greedy")),
         )
         pair_rows = [dict(row) for row in alignment_preview["rows"]]
 
@@ -696,7 +798,7 @@ def apply_compare_run(
     key_field = str(settings.get("key_field", "headword_norm_effective"))
     mode = str(settings.get("mode", "exact+fuzzy"))
     threshold = int(settings.get("fuzzy_threshold", 90))
-    algorithm = str(settings.get("algorithm", "greedy"))
+    algorithm = _normalize_alignment_algorithm(str(settings.get("algorithm", "greedy")))
 
     coverage_preview = preview_coverage(
         db_path=db_path,
@@ -714,6 +816,7 @@ def apply_compare_run(
         limit=None,
         key_field=key_field,
         include_unmatched=True,
+        algorithm=algorithm,
     )
     diff_preview = preview_diff(
         db_path=db_path,

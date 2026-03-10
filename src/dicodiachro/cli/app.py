@@ -761,6 +761,7 @@ def compare_preview(
     coverage_filter: str = typer.Option("all", "--coverage-filter"),
     diff_filter: str = typer.Option("all", "--diff-filter"),
     include_unmatched: bool = typer.Option(True, "--include-unmatched/--no-include-unmatched"),
+    algorithm: str = typer.Option("greedy", "--algorithm", help="greedy|mutual_best"),
 ) -> None:
     paths = init_project(project_dir)
     try:
@@ -781,6 +782,7 @@ def compare_preview(
             limit=limit,
             key_field=key_field,
             include_unmatched=include_unmatched,
+            algorithm=algorithm,
         )
         diff = preview_diff(
             db_path=paths.db_path,
@@ -814,7 +816,7 @@ def compare_apply(
     mode: str = typer.Option("exact+fuzzy", "--mode"),
     threshold: int = typer.Option(90, "--threshold", min=70, max=95),
     key_field: str = typer.Option("headword_norm_effective", "--key-field"),
-    algorithm: str = typer.Option("greedy", "--algorithm"),
+    algorithm: str = typer.Option("greedy", "--algorithm", help="greedy|mutual_best"),
 ) -> None:
     paths = init_project(project_dir)
     try:
