@@ -317,11 +317,7 @@ def _alignment_rows_fuzzy(
                 score = float(fuzz.ratio(key_a, key_b))
                 if (
                     score > best_score
-                    or (
-                        score == best_score
-                        and best_key_b is not None
-                        and key_b < best_key_b
-                    )
+                    or (score == best_score and best_key_b is not None and key_b < best_key_b)
                     or (score == best_score and best_key_b is None)
                 ):
                     best_key_b = key_b
@@ -363,11 +359,7 @@ def _alignment_rows_fuzzy(
             score = float(fuzz.ratio(key_a, key_b))
             if (
                 score > best_score
-                or (
-                    score == best_score
-                    and best_key_b is not None
-                    and key_b < best_key_b
-                )
+                or (score == best_score and best_key_b is not None and key_b < best_key_b)
                 or (score == best_score and best_key_b is None)
             ):
                 best_key_b = key_b
@@ -383,11 +375,7 @@ def _alignment_rows_fuzzy(
             score = float(fuzz.ratio(key_b, key_a))
             if (
                 score > best_score
-                or (
-                    score == best_score
-                    and best_key_a is not None
-                    and key_a < best_key_a
-                )
+                or (score == best_score and best_key_a is not None and key_a < best_key_a)
                 or (score == best_score and best_key_a is None)
             ):
                 best_key_a = key_a

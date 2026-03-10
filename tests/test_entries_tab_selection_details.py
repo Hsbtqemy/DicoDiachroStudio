@@ -46,7 +46,9 @@ def test_entries_tab_details_follow_selection_changes(tmp_path: Path) -> None:
     assert row1_id in details_second
     assert details_second != details_first
 
-    selected_id = str(tab.model.item(tab.table.currentIndex().row(), 0).data(Qt.ItemDataRole.UserRole))
+    selected_id = str(
+        tab.model.item(tab.table.currentIndex().row(), 0).data(Qt.ItemDataRole.UserRole)
+    )
     assert selected_id == row1_id
 
     tab.close()
