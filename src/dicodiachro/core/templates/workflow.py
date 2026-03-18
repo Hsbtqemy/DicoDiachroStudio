@@ -165,7 +165,7 @@ def apply_template_to_corpus(
                 section="",
                 syllables=1,
                 headword_raw=draft.headword_raw,
-                pos_raw=_default_pos(template_spec.kind),
+                pos_raw=(str(draft.pos_raw).strip() if draft.pos_raw else _default_pos(template_spec.kind)),
                 pron_raw=draft.pron_raw,
                 source_path=draft.source_path,
                 line_no=draft.record_no,

@@ -120,3 +120,31 @@ def test_apply_template_to_corpus_persists_entries_issues_and_metadata(tmp_path)
 
     history = store.list_template_applications("corpus_test", limit=5)
     assert len(history) >= 1
+
+
+def test_apply_template_to_corpus_preserves_pos_from_template_entry(tmp_path) -> None:
+    project_dir = tmp_path / "project"
+    paths = init_project(project_dir)
+    store = SQLiteStore(paths.db_path)
+
+    source = paths.raw_dir / "imports" / "fr_en_pron.txt"
+    source.write_text("Abcéder , v. a.   To impose.   Toû ïmmpâss.\n", encoding="utf-8")
+
+    spec = TemplateSpec(
+        template_id="fr_en_pron_three_cols",
+        kind=TemplateKind.FR_EN_PRON_THREE_COLS,
+        version=1,
+        params={"separator_mode": "triple_spaces"},
+    )
+
+    summary = apply_template_to_corpus(
+        project_dir=project_dir,
+        corpus_id="corpus_test",
+        source_path=source,
+        template_spec=spec,
+    )
+
+    assert summary["entries_count"] == 1
+    rows = store.entries_for_dict("corpus_test")
+    assert len(rows) == 1
+    assert str(rows[0]["pos_raw"]) == "v. a."

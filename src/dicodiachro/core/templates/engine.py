@@ -19,6 +19,8 @@ from .spec import (
 
 PUNCT_ARTIFACTS = {".", "..", "...", "*", "-", "—", "•"}
 MULTI_SPACE_RE = re.compile(r"\s{2,}")
+TRIPLE_SPACE_RE = re.compile(r"\s{3,}")
+POS_TAIL_RE = re.compile(r"^(?P<head>.+?)\s+(?P<pos>(?:[a-z]\.\s*){1,4})$", re.IGNORECASE)
 
 
 class TemplateEngineError(RuntimeError):
@@ -133,6 +135,62 @@ def _find_separator(text: str, mode: str, custom_separator: str = "") -> tuple[s
         return left, right
 
     return None
+
+
+def _split_three_columns(
+    text: str,
+    *,
+    separator_mode: str,
+    custom_separator: str = "",
+) -> tuple[str, str, str] | None:
+    stripped = text.strip()
+    if not stripped:
+        return None
+
+    def _split_once(mode: str) -> tuple[str, str, str] | None:
+        raw_parts: list[str]
+        if mode == "tab":
+            raw_parts = stripped.split("\t")
+        elif mode == "double_spaces":
+            raw_parts = MULTI_SPACE_RE.split(stripped)
+        elif mode == "custom":
+            if not custom_separator:
+                return None
+            raw_parts = stripped.split(custom_separator)
+        else:
+            raw_parts = TRIPLE_SPACE_RE.split(stripped)
+
+        parts = [part.strip() for part in raw_parts if part.strip()]
+        if len(parts) < 3:
+            return None
+        if len(parts) == 3:
+            return parts[0], parts[1], parts[2]
+        return parts[0], " ".join(parts[1:-1]), parts[-1]
+
+    if separator_mode == "auto":
+        candidates = ["tab", "triple_spaces", "double_spaces"]
+        if custom_separator.strip():
+            candidates.append("custom")
+        for mode in candidates:
+            split = _split_once(mode)
+            if split is not None:
+                return split
+        return None
+
+    return _split_once(separator_mode)
+
+
+def _extract_headword_pos(first_column: str) -> tuple[str, str]:
+    cleaned = first_column.strip()
+    while cleaned and not cleaned[0].isalnum():
+        cleaned = cleaned[1:].lstrip()
+    if "," not in cleaned:
+        match = POS_TAIL_RE.match(cleaned)
+        if match is None:
+            return cleaned, ""
+        return str(match.group("head") or "").strip(), str(match.group("pos") or "").strip()
+    headword, pos = cleaned.split(",", 1)
+    return headword.strip(), pos.strip()
 
 
 def _apply_wordlist(
@@ -471,6 +529,87 @@ def _apply_csv_mapping(
     return drafts, rows
 
 
+def _apply_fr_en_pron_three_cols(
+    record: SourceRecord,
+    params: dict[str, Any],
+) -> tuple[list[EntryDraft], list[PreviewRow]]:
+    separator_mode = str(params.get("separator_mode", "auto"))
+    custom_separator = str(params.get("custom_separator", "") or "")
+    trim_punctuation = bool(params.get("trim_punctuation", True))
+
+    split = _split_three_columns(
+        record.raw_text,
+        separator_mode=separator_mode,
+        custom_separator=custom_separator,
+    )
+    if split is None:
+        return [], [
+            PreviewRow(
+                source=record.raw_text,
+                headword_raw="",
+                pron_raw="",
+                definition_raw="",
+                source_id=record.source_id,
+                record_key=record.record_key,
+                status="Non reconnu",
+                reason="pas 3 colonnes",
+                source_path=record.source_path,
+                record_no=record.record_no,
+                issue_code="UNRECOGNIZED_RECORD",
+            )
+        ]
+
+    first_col, english_col, pron_col = split
+    headword, pos = _extract_headword_pos(first_col)
+    if trim_punctuation:
+        headword = _strip_terminal_punctuation(headword)
+        pos = pos.strip()
+        english_col = english_col.strip()
+        pron_col = pron_col.strip()
+
+    if not headword:
+        return [], [
+            PreviewRow(
+                source=record.raw_text,
+                headword_raw="",
+                pron_raw=pron_col,
+                definition_raw=english_col,
+                source_id=record.source_id,
+                record_key=record.record_key,
+                status="Non reconnu",
+                reason="headword vide",
+                source_path=record.source_path,
+                record_no=record.record_no,
+                issue_code="EMPTY_HEADWORD",
+            )
+        ]
+
+    draft = EntryDraft(
+        headword_raw=headword,
+        pron_raw=pron_col or None,
+        definition_raw=english_col or None,
+        source_id=record.source_id,
+        record_key=record.record_key,
+        source_path=record.source_path,
+        record_no=record.record_no,
+        source_record=record.raw_text,
+        pos_raw=pos or None,
+    )
+    row = PreviewRow(
+        source=record.raw_text,
+        headword_raw=headword,
+        pron_raw=pron_col,
+        definition_raw=english_col,
+        source_id=record.source_id,
+        record_key=record.record_key,
+        status="OK",
+        reason="",
+        source_path=record.source_path,
+        record_no=record.record_no,
+    )
+    return [draft], [row]
+
+
 def _apply_record(
     kind: TemplateKind,
     params: dict[str, Any],
@@ -482,6 +621,8 @@ def _apply_record(
         return _apply_entry_plus_definition(record, params)
     if kind == TemplateKind.HEADWORD_PLUS_PRON:
         return _apply_headword_plus_pron(record, params)
+    if kind == TemplateKind.FR_EN_PRON_THREE_COLS:
+        return _apply_fr_en_pron_three_cols(record, params)
     if kind == TemplateKind.CSV_MAPPING:
         return _apply_csv_mapping(record, params)
     raise TemplateEngineError(f"Gabarit non supporté: {kind}")

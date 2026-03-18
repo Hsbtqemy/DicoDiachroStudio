@@ -11,6 +11,7 @@ class TemplateKind(str, Enum):
     WORDLIST_TOKENS = "wordlist_tokens"
     ENTRY_PLUS_DEFINITION = "entry_plus_definition"
     HEADWORD_PLUS_PRON = "headword_plus_pron"
+    FR_EN_PRON_THREE_COLS = "fr_en_pron_three_cols"
     CSV_MAPPING = "csv_mapping"
 
 
@@ -51,6 +52,7 @@ class EntryDraft:
     source_path: str
     record_no: int
     source_record: str
+    pos_raw: str | None = None
 
 
 @dataclass(slots=True)

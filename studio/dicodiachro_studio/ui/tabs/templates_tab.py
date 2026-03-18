@@ -43,8 +43,12 @@ from dicodiachro.core.overrides import (
 )
 from dicodiachro.core.pipeline import PipelineError
 from dicodiachro.core.templates.csv_mapping import available_csv_columns
-from dicodiachro.core.templates.engine import TemplateEngineError, load_source_records
-from dicodiachro.core.templates.spec import TemplateKind, TemplateSpec
+from dicodiachro.core.templates.engine import (
+    TemplateEngineError,
+    apply_template_to_records,
+    load_source_records,
+)
+from dicodiachro.core.templates.spec import SourceRecord, TemplateKind, TemplateSpec
 from dicodiachro.core.templates.workflow import (
     apply_template_to_corpus,
     list_template_sources,
@@ -67,6 +71,10 @@ TEMPLATE_META: dict[TemplateKind, tuple[str, str]] = {
     TemplateKind.HEADWORD_PLUS_PRON: (
         "Mot + prononciation",
         "Sépare la ligne en deux champs (headword et prononciation).",
+    ),
+    TemplateKind.FR_EN_PRON_THREE_COLS: (
+        "FR + EN + pron (3 colonnes)",
+        "Extrait headword/pos depuis la colonne FR, l'anglais en définition, et la prononciation en colonne 3.",
     ),
     TemplateKind.CSV_MAPPING: (
         "CSV (mapping)",
@@ -374,6 +382,17 @@ class TemplatesTab(QWidget):
         self.headpron_custom.setPlaceholderText("Séparateur custom")
         self.headpron_trim = QCheckBox("Nettoyer ponctuation terminale")
 
+        self.fr_en_pron_separator = QComboBox()
+        self.fr_en_pron_separator.addItem("Auto (recommandé)", "auto")
+        self.fr_en_pron_separator.addItem("3+ espaces", "triple_spaces")
+        self.fr_en_pron_separator.addItem("2+ espaces", "double_spaces")
+        self.fr_en_pron_separator.addItem("Tabulation", "tab")
+        self.fr_en_pron_separator.addItem("Séparateur custom", "custom")
+        self.fr_en_pron_custom = QLineEdit()
+        self.fr_en_pron_custom.setPlaceholderText("Séparateur custom")
+        self.fr_en_pron_trim = QCheckBox("Nettoyer ponctuation terminale")
+        self.fr_en_pron_trim.setChecked(True)
+
         self.csv_headword_col = QComboBox()
         self.csv_pron_col = QComboBox()
         self.csv_definition_col = QComboBox()
@@ -411,6 +430,13 @@ class TemplatesTab(QWidget):
         headpron_form.addRow(self.headpron_trim)
         self.headpron_panel.setLayout(headpron_form)
 
+        self.fr_en_pron_panel = QWidget()
+        fr_en_pron_form = QFormLayout()
+        fr_en_pron_form.addRow("Séparateur colonnes", self.fr_en_pron_separator)
+        fr_en_pron_form.addRow("Custom", self.fr_en_pron_custom)
+        fr_en_pron_form.addRow(self.fr_en_pron_trim)
+        self.fr_en_pron_panel.setLayout(fr_en_pron_form)
+
         self.csv_panel = QWidget()
         csv_form = QFormLayout()
         csv_form.addRow("Colonne Headword", self.csv_headword_col)
@@ -423,6 +449,7 @@ class TemplatesTab(QWidget):
         self.params_layout.addWidget(self.wordlist_panel)
         self.params_layout.addWidget(self.entrydef_panel)
         self.params_layout.addWidget(self.headpron_panel)
+        self.params_layout.addWidget(self.fr_en_pron_panel)
         self.params_layout.addWidget(self.csv_panel)
 
         refresh_btn = QPushButton("Rafraîchir")
@@ -430,6 +457,8 @@ class TemplatesTab(QWidget):
 
         preview_btn = QPushButton("Prévisualiser")
         preview_btn.clicked.connect(self.preview_template)
+        suggest_template_btn = QPushButton("Construire depuis sélection")
+        suggest_template_btn.clicked.connect(self.build_template_from_selection)
         skip_selected_btn = QPushButton("Ignorer sélection")
         skip_selected_btn.clicked.connect(self.skip_selected_preview_records)
         clear_selected_btn = QPushButton("Annuler override sélection")
@@ -470,6 +499,7 @@ class TemplatesTab(QWidget):
         center_layout = QVBoxLayout()
         preview_top = QHBoxLayout()
         preview_top.addWidget(preview_btn)
+        preview_top.addWidget(suggest_template_btn)
         preview_top.addWidget(skip_selected_btn)
         preview_top.addWidget(clear_selected_btn)
         preview_top.addWidget(QLabel("Lignes"))
@@ -583,6 +613,7 @@ class TemplatesTab(QWidget):
         self.wordlist_panel.setVisible(kind == TemplateKind.WORDLIST_TOKENS)
         self.entrydef_panel.setVisible(kind == TemplateKind.ENTRY_PLUS_DEFINITION)
         self.headpron_panel.setVisible(kind == TemplateKind.HEADWORD_PLUS_PRON)
+        self.fr_en_pron_panel.setVisible(kind == TemplateKind.FR_EN_PRON_THREE_COLS)
         self.csv_panel.setVisible(kind == TemplateKind.CSV_MAPPING)
 
         self.template_id_edit.setText(kind.value)
@@ -717,6 +748,13 @@ class TemplatesTab(QWidget):
                 "trim_punctuation": self.headpron_trim.isChecked(),
             }
 
+        if kind == TemplateKind.FR_EN_PRON_THREE_COLS:
+            return {
+                "separator_mode": str(self.fr_en_pron_separator.currentData() or "auto"),
+                "custom_separator": self.fr_en_pron_custom.text().strip(),
+                "trim_punctuation": self.fr_en_pron_trim.isChecked(),
+            }
+
         return {
             "headword_column": str(self.csv_headword_col.currentData() or ""),
             "pron_column": str(self.csv_pron_col.currentData() or ""),
@@ -724,6 +762,239 @@ class TemplatesTab(QWidget):
             "split_headword": str(self.csv_split_mode.currentData() or "none"),
             "ignore_empty_headword": self.csv_ignore_empty.isChecked(),
         }
+
+    @staticmethod
+    def _set_combo_data(combo: QComboBox, value: str, fallback: str) -> None:
+        idx = combo.findData(value)
+        if idx < 0:
+            idx = combo.findData(fallback)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+
+    def _set_template_kind(self, kind: TemplateKind) -> bool:
+        for idx in range(self.template_list.count()):
+            item = self.template_list.item(idx)
+            if TemplateKind(str(item.data(Qt.ItemDataRole.UserRole))) != kind:
+                continue
+            if not item.flags() & Qt.ItemFlag.ItemIsEnabled:
+                return False
+            self.template_list.setCurrentRow(idx)
+            return True
+        return False
+
+    def _selected_payloads_for_builder(self) -> list[dict[str, Any]]:
+        payloads = self._selected_preview_payloads()
+        selection_model = self.preview_table.selectionModel()
+        selected_count = len(selection_model.selectedRows()) if selection_model is not None else 0
+        if selected_count > 1:
+            return payloads
+        if self.visible_rows:
+            return list(self.visible_rows[: min(30, len(self.visible_rows))])
+        return payloads
+
+    def _build_source_records_from_payloads(
+        self,
+        payloads: list[dict[str, Any]],
+    ) -> list[SourceRecord]:
+        records: list[SourceRecord] = []
+        seen: set[tuple[str, str]] = set()
+        fallback_source_id = str(self._preview_source_id() or "")
+        for idx, payload in enumerate(payloads, start=1):
+            source_text = str(payload.get("source") or "").strip()
+            if not source_text:
+                continue
+
+            source_id = str(payload.get("source_id") or fallback_source_id).strip() or "preview"
+            record_key = str(payload.get("record_key") or f"preview-{idx}").strip()
+            pair = (source_id, record_key)
+            if pair in seen:
+                continue
+            seen.add(pair)
+
+            source_path = str(payload.get("source_path") or source_id).strip() or source_id
+            record_no = int(payload.get("record_no") or idx)
+            records.append(
+                SourceRecord(
+                    source_id=source_id,
+                    source_path=source_path,
+                    record_key=record_key,
+                    record_no=record_no,
+                    source_type="text",
+                    raw_text=source_text,
+                )
+            )
+        return records
+
+    @staticmethod
+    def _recommend_template_for_records(
+        records: list[SourceRecord],
+    ) -> tuple[TemplateKind, dict[str, object], dict[str, int]] | None:
+        if not records:
+            return None
+
+        candidates: list[tuple[TemplateKind, dict[str, object], int]] = [
+            (
+                TemplateKind.FR_EN_PRON_THREE_COLS,
+                {"separator_mode": "auto", "custom_separator": "", "trim_punctuation": True},
+                90,
+            ),
+            (
+                TemplateKind.FR_EN_PRON_THREE_COLS,
+                {"separator_mode": "triple_spaces", "custom_separator": "", "trim_punctuation": True},
+                80,
+            ),
+            (
+                TemplateKind.FR_EN_PRON_THREE_COLS,
+                {"separator_mode": "tab", "custom_separator": "", "trim_punctuation": True},
+                70,
+            ),
+            (
+                TemplateKind.HEADWORD_PLUS_PRON,
+                {"separator_mode": "multi_spaces", "custom_separator": "", "trim_punctuation": True},
+                50,
+            ),
+            (
+                TemplateKind.HEADWORD_PLUS_PRON,
+                {"separator_mode": "tab", "custom_separator": "", "trim_punctuation": True},
+                40,
+            ),
+            (
+                TemplateKind.ENTRY_PLUS_DEFINITION,
+                {"separator_mode": "comma", "custom_separator": ""},
+                30,
+            ),
+            (
+                TemplateKind.ENTRY_PLUS_DEFINITION,
+                {"separator_mode": "double_space", "custom_separator": ""},
+                20,
+            ),
+        ]
+
+        best: tuple[TemplateKind, dict[str, object], dict[str, int]] | None = None
+        best_score = -10_000
+
+        for kind, params, priority in candidates:
+            applied = apply_template_to_records(kind=kind, params=params, records=records)
+            ok_record_keys = {
+                row.record_key for row in applied.preview_rows if str(row.status or "").strip() == "OK"
+            }
+            unrecognized_keys = {
+                row.record_key
+                for row in applied.preview_rows
+                if str(row.status or "").strip() == "Non reconnu"
+            }
+            ignored_keys = {
+                row.record_key
+                for row in applied.preview_rows
+                if str(row.status or "").strip() == "Ignoré"
+            }
+            overflow_penalty = max(0, applied.entries_count - len(records) * 3)
+            score = (
+                len(ok_record_keys) * 20
+                + applied.entries_count
+                - len(unrecognized_keys) * 10
+                - len(ignored_keys) * 4
+                - overflow_penalty
+                + priority
+            )
+            if score <= best_score:
+                continue
+            best_score = score
+            best = (
+                kind,
+                params,
+                {
+                    "score": score,
+                    "records": len(records),
+                    "ok_records": len(ok_record_keys),
+                    "entries": applied.entries_count,
+                    "unrecognized": len(unrecognized_keys),
+                },
+            )
+
+        return best
+
+    def _apply_template_suggestion(self, kind: TemplateKind, params: dict[str, object]) -> bool:
+        if not self._set_template_kind(kind):
+            return False
+
+        if kind == TemplateKind.ENTRY_PLUS_DEFINITION:
+            self._set_combo_data(
+                self.entrydef_separator,
+                str(params.get("separator_mode") or "comma"),
+                "comma",
+            )
+            self.entrydef_custom.setText(str(params.get("custom_separator") or ""))
+        elif kind == TemplateKind.HEADWORD_PLUS_PRON:
+            self._set_combo_data(
+                self.headpron_separator,
+                str(params.get("separator_mode") or "multi_spaces"),
+                "multi_spaces",
+            )
+            self.headpron_custom.setText(str(params.get("custom_separator") or ""))
+            self.headpron_trim.setChecked(bool(params.get("trim_punctuation", True)))
+        elif kind == TemplateKind.FR_EN_PRON_THREE_COLS:
+            self._set_combo_data(
+                self.fr_en_pron_separator,
+                str(params.get("separator_mode") or "auto"),
+                "auto",
+            )
+            self.fr_en_pron_custom.setText(str(params.get("custom_separator") or ""))
+            self.fr_en_pron_trim.setChecked(bool(params.get("trim_punctuation", True)))
+
+        current_template_id = self.template_id_edit.text().strip()
+        if not current_template_id or current_template_id == kind.value:
+            self.template_id_edit.setText(f"custom_{kind.value}")
+        return True
+
+    def build_template_from_selection(self) -> None:
+        payloads = self._selected_payloads_for_builder()
+        if not payloads:
+            QMessageBox.information(
+                self,
+                "Assistant gabarit",
+                "Prévisualisez puis sélectionnez des lignes (ou laissez la vue active).",
+            )
+            return
+
+        records = self._build_source_records_from_payloads(payloads)
+        if not records:
+            QMessageBox.information(
+                self,
+                "Assistant gabarit",
+                "Impossible d'extraire des records exploitables depuis la sélection.",
+            )
+            return
+
+        recommendation = self._recommend_template_for_records(records)
+        if recommendation is None:
+            QMessageBox.warning(
+                self,
+                "Assistant gabarit",
+                "Aucune recommandation fiable n'a été trouvée.",
+            )
+            return
+
+        kind, params, metrics = recommendation
+        if not self._apply_template_suggestion(kind, params):
+            QMessageBox.warning(
+                self,
+                "Assistant gabarit",
+                "Le gabarit recommandé n'est pas disponible pour la source actuelle.",
+            )
+            return
+
+        self.preview_template()
+        label, _ = TEMPLATE_META[kind]
+        QMessageBox.information(
+            self,
+            "Assistant gabarit",
+            (
+                f"Gabarit recommandé: {label}\n"
+                f"Records OK: {metrics['ok_records']}/{metrics['records']}\n"
+                f"Entrées: {metrics['entries']} | Non reconnus: {metrics['unrecognized']}"
+            ),
+        )
 
     def _require_project(self) -> bool:
         if not self.state.project_dir:

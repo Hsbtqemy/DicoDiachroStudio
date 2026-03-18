@@ -362,6 +362,11 @@ def _apply_record_overrides_to_entries(
                         source_path=first.source_path,
                         record_no=first.record_no,
                         source_record=first.source_record,
+                        pos_raw=(
+                            str(item.get("pos_raw") or "").strip()
+                            or first.pos_raw
+                            or None
+                        ),
                     )
                 )
             continue
@@ -386,6 +391,11 @@ def _apply_record_overrides_to_entries(
                 source_path=first.source_path,
                 record_no=first.record_no,
                 source_record=first.source_record,
+                pos_raw=(
+                    str(spec.after.get("pos_raw") or "").strip()
+                    or first.pos_raw
+                    or None
+                ),
             )
             output.append(edited)
             continue
