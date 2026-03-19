@@ -55,12 +55,17 @@ def parse_lines(
     source_path: str,
     parser_preset: ParserPresetSpec | None = None,
     parser_sha256: str | None = None,
+    line_pages: list[int] | None = None,
 ) -> tuple[list[ParsedEntry], list[Issue]]:
     entries: list[ParsedEntry] = []
     issues: list[Issue] = []
     current_section = ""
 
     for line_no, raw_line in enumerate(lines, start=1):
+        page = None
+        if line_pages is not None and 1 <= line_no <= len(line_pages):
+            page = line_pages[line_no - 1]
+
         line = raw_line.strip()
         if not line:
             continue
@@ -110,6 +115,7 @@ def parse_lines(
                         ),
                         source_path=source_path,
                         line_no=line_no,
+                        page=page,
                         raw_line=raw_line.rstrip("\n"),
                         origin_raw=(
                             str(parsed.values["origin_raw"]).strip()
@@ -159,6 +165,7 @@ def parse_lines(
                     pron_raw=token,
                     source_path=source_path,
                     line_no=line_no,
+                    page=page,
                     raw_line=raw_line.rstrip("\n"),
                     parser_id=parser_preset.parser_id if parser_preset else None,
                     parser_version=parser_preset.version if parser_preset else None,

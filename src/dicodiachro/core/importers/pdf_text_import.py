@@ -134,7 +134,8 @@ def extract_pdf_text_lines(
     *,
     columns: int = 1,
     min_chars_per_page: int = 4,
-) -> tuple[list[str], int, int]:
+) -> tuple[list[str], list[int], int, int]:
+    """Extract text lines and per-line page numbers (1-based)."""
     if columns < 1 or columns > 3:
         raise PDFTextImportError(
             "columns must be between 1 and 3",
@@ -150,17 +151,19 @@ def extract_pdf_text_lines(
         ) from exc
 
     all_lines: list[str] = []
+    all_line_pages: list[int] = []
     pages_total = 0
     pages_with_text = 0
 
     with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
+        for page_no, page in enumerate(pdf.pages, start=1):
             pages_total += 1
             page_lines = _extract_page_lines(page, columns=columns)
             text_chars = sum(len(NON_WS_RE.sub("", line)) for line in page_lines)
             if text_chars >= min_chars_per_page:
                 pages_with_text += 1
             all_lines.extend(page_lines)
+            all_line_pages.extend([page_no] * len(page_lines))
 
     if pages_total == 0 or pages_with_text == 0 or not all_lines:
         raise PDFTextImportError(
@@ -173,7 +176,7 @@ def extract_pdf_text_lines(
             },
         )
 
-    return all_lines, pages_total, pages_with_text
+    return all_lines, all_line_pages, pages_total, pages_with_text
 
 
 def _default_target_path(project_dir: Path, pdf_path: Path) -> Path:
@@ -205,12 +208,17 @@ def import_pdf_text(
     if not source_pdf.exists() or not source_pdf.is_file():
         raise PDFTextImportError(f"PDF introuvable: {source_pdf}")
 
-    lines, pages_total, pages_with_text = extract_pdf_text_lines(
+    lines, line_pages, pages_total, pages_with_text = extract_pdf_text_lines(
         source_pdf,
         columns=columns,
     )
     target_txt = _resolve_target_path(project_dir, source_pdf, out)
     target_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    sidecar_path = target_txt.with_name(target_txt.name + ".line_pages")
+    sidecar_path.write_text(
+        "\n".join(str(p) for p in line_pages) + ("\n" if line_pages else ""),
+        encoding="utf-8",
+    )
     return PDFTextImportResult(
         source_pdf=source_pdf,
         output_text_paths=[target_txt],

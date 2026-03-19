@@ -47,6 +47,7 @@ ENTRY_FIELDS = [
     "features_json",
     "source_path",
     "line_no",
+    "page",
     "created_at",
 ]
 
@@ -120,6 +121,7 @@ def _export_payload(row) -> dict[str, str]:
             "features_json": row["features_json"] or "{}",
             "source_path": row["source_path"] or "",
             "line_no": row["line_no"] or "",
+            "page": row["page"] if row.get("page") is not None else "",
             "created_at": row["created_at"] or "",
         }
     )

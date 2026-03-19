@@ -69,6 +69,21 @@ def discover_source_texts(raw_dir: Path) -> list[Path]:
     return sorted(p for p in raw_dir.rglob("*.txt") if p.is_file())
 
 
+def _load_line_pages(path: Path, num_lines: int) -> list[int] | None:
+    """Load .line_pages sidecar if present; return list of page numbers (1-based) or None."""
+    sidecar = path.with_name(path.name + ".line_pages")
+    if not sidecar.exists():
+        return None
+    try:
+        raw = sidecar.read_text(encoding="utf-8").strip().splitlines()
+        line_pages = [int(x) for x in raw if x.strip()]
+        if len(line_pages) != num_lines:
+            return None
+        return line_pages
+    except (ValueError, OSError):
+        return None
+
+
 def _parse_source(
     path: Path,
     dict_id: str,
@@ -76,13 +91,27 @@ def _parse_source(
     source_filters: SourceFilterConfig | None = None,
 ) -> tuple[list[ParsedEntry], list[Issue], list[str], dict[str, Any]]:
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    line_pages_raw = _load_line_pages(path, len(lines))
     filtered = apply_source_filters(lines, source_path=path, config=source_filters)
+    line_pages: list[int] | None = None
+    if line_pages_raw is not None and filtered.dropped_line_numbers is not None:
+        dropped = set(filtered.dropped_line_numbers)
+        line_pages = [
+            line_pages_raw[i - 1]
+            for i in range(1, len(lines) + 1)
+            if i not in dropped
+        ]
+        if len(line_pages) != len(filtered.lines):
+            line_pages = None
+    elif line_pages_raw is not None and len(line_pages_raw) == len(filtered.lines):
+        line_pages = line_pages_raw
     entries, parse_issues = parse_lines(
         filtered.lines,
         dict_id=dict_id,
         source_path=str(path),
         parser_preset=parser.spec if parser else None,
         parser_sha256=parser.sha256 if parser else None,
+        line_pages=line_pages,
     )
     qa_issues = lint_lines(filtered.lines, dict_id=dict_id, source_path=str(path))
     qa_issues.extend(validate_entries(entries))
@@ -290,6 +319,7 @@ def apply_profile_to_entries(project_dir: Path, dict_id: str, profile_name: str)
             pron_raw=row["pron_raw"],
             source_path=row["source_path"],
             line_no=int(row["line_no"]),
+            page=(int(row["page"]) if "page" in row.keys() and row["page"] is not None else None),
             raw_line=f"{row['syllables']} {row['headword_raw']}, {row['pos_raw']}",
             origin_raw=row["origin_raw"],
             origin_norm=row["origin_norm"],

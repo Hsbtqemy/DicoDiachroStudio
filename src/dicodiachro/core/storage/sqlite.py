@@ -162,8 +162,21 @@ def create_schema(conn: sqlite3.Connection) -> None:
             record_key TEXT,
             source_path TEXT NOT NULL,
             line_no INTEGER NOT NULL,
+            page INTEGER,
+            extra_json TEXT,
             created_at TEXT NOT NULL,
             FOREIGN KEY(dict_id) REFERENCES dictionaries(dict_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS corpus_field_schema (
+            corpus_id TEXT NOT NULL,
+            field_id TEXT NOT NULL,
+            label TEXT NOT NULL,
+            field_type TEXT NOT NULL DEFAULT 'text',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            optional INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (corpus_id, field_id),
+            FOREIGN KEY(corpus_id) REFERENCES dictionaries(dict_id)
         );
 
         CREATE TABLE IF NOT EXISTS issues (
@@ -375,6 +388,8 @@ def _ensure_entries_columns(conn: sqlite3.Connection) -> None:
         "deleted_reason": "TEXT",
         "source_id": "TEXT",
         "record_key": "TEXT",
+        "page": "INTEGER",
+        "extra_json": "TEXT",
     }
     for column_name, column_type in expected_columns.items():
         if column_name in existing_columns:
@@ -816,10 +831,11 @@ class SQLiteStore:
                         entry.record_key,
                         entry.source_path,
                         entry.line_no,
+                        getattr(entry, "page", None),
                         utc_now_iso(),
                     )
                 )
-            placeholders = ",".join(["?"] * 37)
+            placeholders = ",".join(["?"] * 38)
             conn.executemany(
                 f"""
                 INSERT OR REPLACE INTO entries(
@@ -829,7 +845,7 @@ class SQLiteStore:
                   form_display, form_norm, headword_norm, pron_norm, pron_render, features_json,
                   profile_id, profile_version, profile_sha256,
                   headword_edit, pron_edit, definition_edit, status, alpha_bucket, source_id, record_key,
-                  source_path, line_no, created_at
+                  source_path, line_no, page, created_at
                 ) VALUES ({placeholders})
                 """,
                 rows,
@@ -849,6 +865,7 @@ class SQLiteStore:
         source_path: str | None = None,
         source_record: str | None = None,
         line_no: int | None = None,
+        page: int | None = None,
         status: str = "reviewed",
         manual_created: bool = True,
         section: str = "",
@@ -901,8 +918,8 @@ class SQLiteStore:
                 INSERT INTO entries(
                   entry_id, dict_id, section, syllables, headword_raw, pos_raw, pron_raw,
                   definition_raw, source_record, status, is_deleted, manual_created, alpha_bucket,
-                  source_id, record_key, source_path, line_no, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  source_id, record_key, source_path, line_no, page, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     entry_id,
@@ -922,6 +939,7 @@ class SQLiteStore:
                     record_key_value,
                     source_path_value,
                     line_no_value,
+                    int(page) if page is not None else None,
                     utc_now_iso(),
                 ),
             )
@@ -1269,12 +1287,21 @@ class SQLiteStore:
         status_filters: set[str] | None = None,
         manual_only: bool = False,
         flags_only: bool = False,
+        page_min: int | None = None,
+        page_max: int | None = None,
     ) -> list[sqlite3.Row]:
         where_parts = ["dict_id=?"]
         params: list[Any] = [dict_id]
 
         if not include_deleted:
             where_parts.append("COALESCE(is_deleted, 0)=0")
+
+        if page_min is not None:
+            where_parts.append("COALESCE(page, 0) >= ?")
+            params.append(int(page_min))
+        if page_max is not None:
+            where_parts.append("COALESCE(page, 0) <= ?")
+            params.append(int(page_max))
 
         cleaned_bucket = str(alpha_bucket or "").strip().upper()
         if cleaned_bucket:
@@ -1415,6 +1442,75 @@ class SQLiteStore:
         with connect(self.db_path) as conn:
             row = conn.execute("SELECT * FROM entries WHERE entry_id=?", (entry_id,)).fetchone()
         return row
+
+    def get_field_schema(self, corpus_id: str) -> list[dict[str, Any]]:
+        """Return ordered list of extra field definitions for this corpus."""
+        with connect(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT field_id, label, field_type, sort_order, optional
+                FROM corpus_field_schema
+                WHERE corpus_id=?
+                ORDER BY sort_order, field_id
+                """,
+                (corpus_id,),
+            ).fetchall()
+        return [
+            {
+                "field_id": str(row["field_id"]),
+                "label": str(row["label"]),
+                "field_type": str(row["field_type"] or "text"),
+                "sort_order": int(row["sort_order"] or 0),
+                "optional": bool(int(row["optional"] or 1)),
+            }
+            for row in rows
+        ]
+
+    def set_field_schema(self, corpus_id: str, schema: list[dict[str, Any]]) -> None:
+        """Replace field schema for this corpus. Each item: field_id, label, field_type?, sort_order?, optional?."""
+        with connect(self.db_path) as conn:
+            conn.execute("DELETE FROM corpus_field_schema WHERE corpus_id=?", (corpus_id,))
+            for idx, item in enumerate(schema):
+                field_id = str(item.get("field_id", "")).strip()
+                if not field_id:
+                    continue
+                label = str(item.get("label", field_id)).strip() or field_id
+                field_type = str(item.get("field_type", "text")).strip() or "text"
+                sort_order = int(item.get("sort_order", idx))
+                optional = 1 if item.get("optional", True) else 0
+                conn.execute(
+                    """
+                    INSERT INTO corpus_field_schema(corpus_id, field_id, label, field_type, sort_order, optional)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (corpus_id, field_id, label, field_type, sort_order, optional),
+                )
+            conn.commit()
+
+    def update_entry_extra(self, entry_id: str, updates: dict[str, str]) -> None:
+        """Merge key-value pairs into entry's extra_json. Empty string removes the key."""
+        if not updates:
+            return
+        with connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT extra_json FROM entries WHERE entry_id=?", (entry_id,)
+            ).fetchone()
+            current: dict[str, Any] = {}
+            if row and row["extra_json"]:
+                try:
+                    current = json.loads(row["extra_json"])
+                except (TypeError, ValueError):
+                    pass
+            for key, value in updates.items():
+                if value == "":
+                    current.pop(key, None)
+                else:
+                    current[key] = value
+            conn.execute(
+                "UPDATE entries SET extra_json=? WHERE entry_id=?",
+                (json.dumps(current, ensure_ascii=False, sort_keys=True) if current else None, entry_id),
+            )
+            conn.commit()
 
     def save_compare_run(
         self,

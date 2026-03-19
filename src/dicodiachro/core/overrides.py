@@ -848,6 +848,7 @@ def split_entry(
                 pron_raw=_effective_field(row, "pron"),
                 source_path=split_source_path,
                 line_no=int(row["line_no"]),
+                page=(int(row["page"]) if "page" in row.keys() and row["page"] is not None else None),
                 raw_line=source_record,
                 origin_raw=(str(row["origin_raw"]) if row["origin_raw"] else None),
                 origin_norm=(str(row["origin_norm"]) if row["origin_norm"] else None),
@@ -921,6 +922,9 @@ def merge_entries(
         ]
     ).strip()
 
+    page_a = int(row_a["page"]) if "page" in row_a.keys() and row_a["page"] is not None else None
+    page_b = int(row_b["page"]) if "page" in row_b.keys() and row_b["page"] is not None else None
+    merged_page = min(page_a, page_b) if page_a is not None and page_b is not None else (page_a or page_b)
     merged = ParsedEntry(
         dict_id=corpus_id,
         section=str(row_a["section"] or row_b["section"] or ""),
@@ -930,6 +934,7 @@ def merge_entries(
         pron_raw=pron or None,
         source_path=f"{row_a['source_path']}+{row_b['source_path']}#merge",
         line_no=min(int(row_a["line_no"]), int(row_b["line_no"])),
+        page=merged_page,
         raw_line=f"{headword}, {row_a['pos_raw']}",
         origin_raw=(str(row_a["origin_raw"]) if row_a["origin_raw"] else None),
         origin_norm=(str(row_a["origin_norm"]) if row_a["origin_norm"] else None),

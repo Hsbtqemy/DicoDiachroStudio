@@ -61,6 +61,16 @@ def test_pdf_text_import_simple(tmp_path: Path) -> None:
     assert "left one" in extracted
     assert "right two" in extracted
 
+    # sidecar .line_pages: one int per line, all 1 for single-page PDF
+    sidecar = result.output_text_paths[0].with_name(
+        result.output_text_paths[0].name + ".line_pages"
+    )
+    assert sidecar.exists()
+    line_pages = [int(x) for x in sidecar.read_text(encoding="utf-8").strip().splitlines()]
+    lines = extracted.strip().splitlines()
+    assert len(line_pages) == len(lines)
+    assert all(p == 1 for p in line_pages)
+
 
 def test_pdf_text_import_two_columns_left_then_right(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"

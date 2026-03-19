@@ -21,6 +21,7 @@ class ParsedEntry:
     source_path: str
     line_no: int
     raw_line: str
+    page: int | None = None
     origin_raw: str | None = None
     origin_norm: str | None = None
     pos_norm: str | None = None

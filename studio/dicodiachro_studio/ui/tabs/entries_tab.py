@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QBrush, QPalette, QStandardItem, QStandardItemModel
+from PySide6.QtCore import QSettings, Qt, QTimer
+from PySide6.QtGui import QAction, QBrush, QKeySequence, QPalette, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSizePolicy,
     QSplitter,
+    QSpinBox,
     QStyle,
     QTableView,
     QTextEdit,
@@ -46,11 +47,25 @@ from dicodiachro.core.overrides import (
 from ...services.state import AppState
 from ...services.theme import apply_theme_safe_styles
 from ..dialogs.add_entry_dialog import AddEntryDialog
+from ..dialogs.field_schema_dialog import FieldSchemaDialog
 from ..widgets.alphabet_bar import AlphabetBar
 
 
 class EntriesTab(QWidget):
     PAGE_SIZE = 100
+
+    COL_SECTION = 0
+    COL_SYLLABLES = 1
+    COL_HEADWORD = 2
+    COL_PRON = 3
+    COL_DEFINITION = 4
+    COL_DISPLAY = 5
+    COL_STATUS = 6
+    COL_FLAGS = 7
+    COL_MANUAL = 8
+    COL_PAGE = 9
+
+    NOMENCLATURE_COLUMNS = (COL_SECTION, COL_HEADWORD, COL_STATUS, COL_FLAGS, COL_PAGE)
 
     def __init__(self, state: AppState) -> None:
         super().__init__()
@@ -60,15 +75,20 @@ class EntriesTab(QWidget):
         self.only_manual = False
         self.flags_only = False
         self.show_deleted = False
+        self.nomenclature_view = False
         self.alpha_bucket_filter: str | None = None
+        self.page_min_filter: int | None = None
+        self.page_max_filter: int | None = None
         self.status_filters: set[str] = {"auto", "reviewed", "validated"}
         self.row_cache: list[dict[str, Any]] = []
         self.dirty_by_entry: dict[str, dict[str, Any]] = {}
+        self.dirty_extra_by_entry: dict[str, dict[str, str]] = {}
+        self.extra_schema: list[dict[str, Any]] = []
         self._loading_model = False
         self._updating_filters = False
 
         self.table = QTableView()
-        self.model = QStandardItemModel(0, 9)
+        self.model = QStandardItemModel(0, 10)
         self.model.setHorizontalHeaderLabels(
             [
                 "section",
@@ -80,6 +100,7 @@ class EntriesTab(QWidget):
                 "status",
                 "flags",
                 "manual",
+                "page",
             ]
         )
         self.table.setModel(self.model)
@@ -105,6 +126,17 @@ class EntriesTab(QWidget):
         self.alpha_bar = AlphabetBar(self)
         self.alpha_bar.bucket_changed.connect(self.on_alpha_bucket_changed)
         self.alpha_filter_label = QLabel("Lettre: Tout")
+
+        self.page_min_spin = QSpinBox()
+        self.page_min_spin.setRange(0, 9999)
+        self.page_min_spin.setSpecialValueText("—")
+        self.page_min_spin.setToolTip("Page min (0 = toutes)")
+        self.page_min_spin.valueChanged.connect(self._on_page_filter_changed)
+        self.page_max_spin = QSpinBox()
+        self.page_max_spin.setRange(0, 9999)
+        self.page_max_spin.setSpecialValueText("—")
+        self.page_max_spin.setToolTip("Page max (0 = toutes)")
+        self.page_max_spin.valueChanged.connect(self._on_page_filter_changed)
 
         self.page_label = QLabel("page 1")
 
@@ -141,6 +173,16 @@ class EntriesTab(QWidget):
         layout.addWidget(self.splitter)
         self.setLayout(layout)
 
+        _s = QSettings()
+        _s.beginGroup("EntriesTab")
+        _val = _s.value("nomenclatureView", False)
+        self.nomenclature_view = _val is True or str(_val).lower() == "true"
+        _s.endGroup()
+        self.nomenclature_view_action.setChecked(self.nomenclature_view)
+
+        self._apply_view_columns()
+        self._install_shortcuts()
+
         apply_theme_safe_styles(self)
 
         self.state.project_changed.connect(self.refresh)
@@ -176,7 +218,7 @@ class EntriesTab(QWidget):
         self.filter_reset_action.triggered.connect(self._reset_status_filters)
 
         self.save_action = QAction("Save edits", self)
-        self.save_action.setToolTip("Enregistrer les champs édités")
+        self.save_action.setToolTip("Enregistrer les champs édités (Ctrl+S)")
         self.save_action.triggered.connect(self.save_edits)
 
         self.revert_action = QAction("Revert row", self)
@@ -187,24 +229,31 @@ class EntriesTab(QWidget):
         self.undo_action.setToolTip("Annuler le dernier override de la ligne")
         self.undo_action.triggered.connect(self.undo_last_override)
 
+        self.nomenclature_view_action = QAction("Vue Nomenclature", self)
+        self.nomenclature_view_action.setCheckable(True)
+        self.nomenclature_view_action.setToolTip(
+            "Afficher seulement section, headword, statut et flags (reconstruire la nomenclature)"
+        )
+        self.nomenclature_view_action.toggled.connect(self._on_nomenclature_view_toggled)
+
         self.split_action = QAction("Split entry", self)
-        self.split_action.setToolTip("Scinder l'entrée sélectionnée")
+        self.split_action.setToolTip("Scinder l'entrée sélectionnée (Ctrl+Shift+S)")
         self.split_action.triggered.connect(self.split_selected_entry)
 
         self.merge_prev_action = QAction("Merge prev", self)
-        self.merge_prev_action.setToolTip("Fusionner avec l'entrée précédente")
+        self.merge_prev_action.setToolTip("Fusionner avec l'entrée précédente (Ctrl+Shift+P)")
         self.merge_prev_action.triggered.connect(lambda: self.merge_selected_entry(direction=-1))
 
         self.merge_next_action = QAction("Merge next", self)
-        self.merge_next_action.setToolTip("Fusionner avec l'entrée suivante")
+        self.merge_next_action.setToolTip("Fusionner avec l'entrée suivante (Ctrl+Shift+N)")
         self.merge_next_action.triggered.connect(lambda: self.merge_selected_entry(direction=1))
 
         self.reviewed_action = QAction("Mark reviewed", self)
-        self.reviewed_action.setToolTip("Marquer l'entrée comme relue")
+        self.reviewed_action.setToolTip("Marquer l'entrée comme relue (Ctrl+Shift+R)")
         self.reviewed_action.triggered.connect(lambda: self.mark_selected_status("reviewed"))
 
         self.validated_action = QAction("Mark validated", self)
-        self.validated_action.setToolTip("Marquer l'entrée comme validée")
+        self.validated_action.setToolTip("Marquer l'entrée comme validée (Ctrl+Shift+V)")
         self.validated_action.triggered.connect(lambda: self.mark_selected_status("validated"))
 
         self.history_action = QAction("Historique", self)
@@ -239,9 +288,15 @@ class EntriesTab(QWidget):
         self.reset_layout_action.setToolTip("Restaurer la disposition 70/30")
         self.reset_layout_action.triggered.connect(self.reset_layout)
 
+        self.field_schema_action = QAction("Champs personnalisés…", self)
+        self.field_schema_action.setToolTip("Définir les champs supplémentaires (étymologie, genre, etc.)")
+        self.field_schema_action.triggered.connect(self.open_field_schema_dialog)
+
         self.prev_action = QAction("Prev", self)
+        self.prev_action.setToolTip("Page précédente (Alt+Gauche)")
         self.prev_action.triggered.connect(self.prev_page)
         self.next_action = QAction("Next", self)
+        self.next_action.setToolTip("Page suivante (Alt+Droite)")
         self.next_action.triggered.connect(self.next_page)
 
     def _new_toolbar(self, title: str, object_name: str) -> QToolBar:
@@ -267,6 +322,10 @@ class EntriesTab(QWidget):
         toolbar_search.addWidget(filters_btn)
         toolbar_search.addWidget(self.alpha_bar)
         toolbar_search.addWidget(self.alpha_filter_label)
+        toolbar_search.addWidget(QLabel("Page:"))
+        toolbar_search.addWidget(self.page_min_spin)
+        toolbar_search.addWidget(QLabel("à"))
+        toolbar_search.addWidget(self.page_max_spin)
 
         toolbar_edit_structure = self._new_toolbar(
             "Curation edit structure", "curation_toolbar_edit_structure"
@@ -275,6 +334,9 @@ class EntriesTab(QWidget):
         toolbar_edit_structure.addAction(self.save_action)
         toolbar_edit_structure.addAction(self.revert_action)
         toolbar_edit_structure.addAction(self.undo_action)
+        toolbar_edit_structure.addSeparator()
+        self._add_toolbar_group(toolbar_edit_structure, "Vue")
+        toolbar_edit_structure.addAction(self.nomenclature_view_action)
         toolbar_edit_structure.addSeparator()
         self._add_toolbar_group(toolbar_edit_structure, "Structure")
         toolbar_edit_structure.addAction(self.split_action)
@@ -297,6 +359,7 @@ class EntriesTab(QWidget):
         plus_menu.addAction(self.fill_pron_action)
         plus_menu.addAction(self.compare_action)
         plus_menu.addAction(self.export_selection_action)
+        plus_menu.addAction(self.field_schema_action)
         plus_menu.addAction(self.history_action)
         plus_menu.addAction(self.reset_layout_action)
 
@@ -320,6 +383,56 @@ class EntriesTab(QWidget):
         group_label = QLabel(f"{label}:")
         group_label.setObjectName(f"curation_group_{label.lower()}")
         toolbar.addWidget(group_label)
+
+    def _apply_view_columns(self) -> None:
+        """Affiche ou masque les colonnes selon le mode Vue Nomenclature / Vue complète."""
+        for col in range(self.model.columnCount()):
+            if self.nomenclature_view:
+                self.table.setColumnHidden(
+                    col, col not in self.NOMENCLATURE_COLUMNS or col >= 10
+                )
+            else:
+                self.table.setColumnHidden(col, False)
+
+    def _on_page_filter_changed(self) -> None:
+        self.page_min_filter = self.page_min_spin.value() or None
+        self.page_max_filter = self.page_max_spin.value() or None
+        if self.page_min_filter == 0:
+            self.page_min_filter = None
+        if self.page_max_filter == 0:
+            self.page_max_filter = None
+        self.offset = 0
+        self.refresh()
+
+    def _on_nomenclature_view_toggled(self, checked: bool) -> None:
+        self.nomenclature_view = checked
+        self._apply_view_columns()
+        _s = QSettings()
+        _s.beginGroup("EntriesTab")
+        _s.setValue("nomenclatureView", self.nomenclature_view)
+        _s.endGroup()
+
+    def _install_shortcuts(self) -> None:
+        """Raccourcis clavier actifs lorsque l'onglet Entrées a le focus."""
+        self.split_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self.merge_prev_action.setShortcut(QKeySequence("Ctrl+Shift+P"))
+        self.merge_next_action.setShortcut(QKeySequence("Ctrl+Shift+N"))
+        self.reviewed_action.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        self.validated_action.setShortcut(QKeySequence("Ctrl+Shift+V"))
+        self.save_action.setShortcut(QKeySequence("Ctrl+S"))
+        self.prev_action.setShortcut(QKeySequence("Alt+Left"))
+        self.next_action.setShortcut(QKeySequence("Alt+Right"))
+        for action in (
+            self.split_action,
+            self.merge_prev_action,
+            self.merge_next_action,
+            self.reviewed_action,
+            self.validated_action,
+            self.save_action,
+            self.prev_action,
+            self.next_action,
+        ):
+            self.addAction(action)
 
     @staticmethod
     def _effective(row: dict[str, Any], stem: str) -> str:
@@ -366,6 +479,7 @@ class EntriesTab(QWidget):
             pron_raw=_text("pron_raw"),
             source_path=str(snapshot.get("source_path") or ""),
             line_no=_int("line_no", 0),
+            page=int(snapshot["page"]) if snapshot.get("page") is not None else None,
             raw_line=str(snapshot.get("raw_line") or ""),
             origin_raw=_text("origin_raw"),
             origin_norm=_text("origin_norm"),
@@ -461,6 +575,49 @@ class EntriesTab(QWidget):
         self.offset += self.PAGE_SIZE
         self.refresh()
 
+    def _base_header_labels(self) -> list[str]:
+        return [
+            "section",
+            "syllables",
+            "headword",
+            "pron",
+            "definition",
+            "display",
+            "status",
+            "flags",
+            "manual",
+            "page",
+        ]
+
+    def _load_extra_schema_and_resize_model(self) -> None:
+        self.extra_schema = (
+            self.state.store.get_field_schema(self.state.active_dict_id)
+            if self.state.store and self.state.active_dict_id
+            else []
+        )
+        total_cols = 10 + len(self.extra_schema)
+        self.model.setColumnCount(total_cols)
+        headers = self._base_header_labels() + [f.get("label") or f.get("field_id") or "?" for f in self.extra_schema]
+        self.model.setHorizontalHeaderLabels(headers)
+
+    def open_field_schema_dialog(self) -> None:
+        if not self.state.store or not self.state.active_dict_id:
+            QMessageBox.warning(
+                self,
+                "Champs personnalisés",
+                "Sélectionnez un corpus actif.",
+            )
+            return
+        dialog = FieldSchemaDialog(
+            self.state.store,
+            self.state.active_dict_id,
+            parent=self,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._load_extra_schema_and_resize_model()
+            self._apply_view_columns()
+            self.refresh()
+
     def refresh(self) -> None:
         if not self.state.store or not self.state.active_dict_id:
             self.model.removeRows(0, self.model.rowCount())
@@ -469,6 +626,8 @@ class EntriesTab(QWidget):
             self.alpha_bar.set_active_bucket(None)
             self.alpha_filter_label.setText("Lettre: Tout")
             return
+
+        self._load_extra_schema_and_resize_model()
 
         alpha_counts = self.state.store.alpha_counts(
             self.state.active_dict_id,
@@ -488,6 +647,8 @@ class EntriesTab(QWidget):
             status_filters=self.status_filters,
             manual_only=self.only_manual,
             flags_only=self.flags_only,
+            page_min=self.page_min_filter if self.page_min_filter and self.page_min_filter > 0 else None,
+            page_max=self.page_max_filter if self.page_max_filter and self.page_max_filter > 0 else None,
         )
         rows_dict = [dict(row) for row in rows]
 
@@ -499,6 +660,7 @@ class EntriesTab(QWidget):
 
         self.row_cache = rows_dict
         self.dirty_by_entry.clear()
+        self.dirty_extra_by_entry.clear()
 
         self._loading_model = True
         self.model.removeRows(0, self.model.rowCount())
@@ -526,6 +688,7 @@ class EntriesTab(QWidget):
                     tooltip_parts.append(f"Raison: {deleted_reason}")
                 deleted_tooltip = "\n".join(tooltip_parts)
 
+            page_val = row.get("page")
             values = [
                 str(row.get("section") or ""),
                 str(row.get("syllables") or ""),
@@ -536,13 +699,28 @@ class EntriesTab(QWidget):
                 status,
                 str(issues_count),
                 manual,
+                str(page_val) if page_val is not None else "",
             ]
+            try:
+                extra = json.loads(row.get("extra_json") or "{}")
+            except (TypeError, ValueError):
+                extra = {}
+            for f in self.extra_schema:
+                field_id = f.get("field_id") or ""
+                values.append(str(extra.get(field_id, "")))
             items = [QStandardItem(value) for value in values]
             for idx, item in enumerate(items):
-                item.setEditable(idx in {2, 3, 4} and not is_deleted)
-            items[0].setData(entry_id, Qt.ItemDataRole.UserRole)
+                is_extra_col = 10 <= idx < 10 + len(self.extra_schema)
+                item.setEditable(
+                    (
+                        idx in {self.COL_HEADWORD, self.COL_PRON, self.COL_DEFINITION}
+                        or is_extra_col
+                    )
+                    and not is_deleted
+                )
+            items[self.COL_SECTION].setData(entry_id, Qt.ItemDataRole.UserRole)
             if is_deleted:
-                items[6].setIcon(trash_icon)
+                items[self.COL_STATUS].setIcon(trash_icon)
                 for item in items:
                     item.setData(deleted_foreground, Qt.ItemDataRole.ForegroundRole)
                     if deleted_tooltip:
@@ -557,7 +735,7 @@ class EntriesTab(QWidget):
         index = self.table.currentIndex()
         if not index.isValid():
             return None
-        item = self.model.item(index.row(), 0)
+        item = self.model.item(index.row(), self.COL_SECTION)
         if not item:
             return None
         value = item.data(Qt.ItemDataRole.UserRole)
@@ -570,7 +748,7 @@ class EntriesTab(QWidget):
         ids: list[str] = []
         seen: set[str] = set()
         for index in selection_model.selectedRows():
-            item = self.model.item(index.row(), 0)
+            item = self.model.item(index.row(), self.COL_SECTION)
             if not item:
                 continue
             value = item.data(Qt.ItemDataRole.UserRole)
@@ -600,12 +778,19 @@ class EntriesTab(QWidget):
         row = self.row_cache[row_idx]
         entry_id = str(row["entry_id"])
 
+        col = item.column()
+        if 10 <= col < 10 + len(self.extra_schema):
+            field_id = self.extra_schema[col - 10].get("field_id") or ""
+            if field_id:
+                self.dirty_extra_by_entry.setdefault(entry_id, {})[field_id] = item.text().strip()
+            return
+
         column_to_field = {
-            2: "headword_edit",
-            3: "pron_edit",
-            4: "definition_edit",
+            self.COL_HEADWORD: "headword_edit",
+            self.COL_PRON: "pron_edit",
+            self.COL_DEFINITION: "definition_edit",
         }
-        field_name = column_to_field.get(item.column())
+        field_name = column_to_field.get(col)
         if not field_name:
             return
 
@@ -625,7 +810,7 @@ class EntriesTab(QWidget):
     def save_edits(self) -> None:
         if not self.state.store or not self.state.active_dict_id:
             return
-        if not self.dirty_by_entry:
+        if not self.dirty_by_entry and not self.dirty_extra_by_entry:
             QMessageBox.information(self, "Curation", "Aucune modification à sauvegarder.")
             return
 
@@ -637,11 +822,14 @@ class EntriesTab(QWidget):
                     entry_id=entry_id,
                     field_changes=field_changes,
                 )
+            for entry_id, extra_updates in self.dirty_extra_by_entry.items():
+                self.state.store.update_entry_extra(entry_id, extra_updates)
         except OverrideError as exc:
             QMessageBox.warning(self, "Curation", str(exc))
             return
 
         QMessageBox.information(self, "Curation", "Modifications enregistrées.")
+        self.state.notify_data_changed()
         self.refresh()
 
     def add_entry(self) -> None:
@@ -680,7 +868,7 @@ class EntriesTab(QWidget):
 
     def _focus_entry(self, entry_id: str) -> bool:
         for row_idx in range(self.model.rowCount()):
-            row_item = self.model.item(row_idx, 0)
+            row_item = self.model.item(row_idx, self.COL_SECTION)
             if not row_item:
                 continue
             current_id = str(row_item.data(Qt.ItemDataRole.UserRole) or "")
@@ -717,7 +905,7 @@ class EntriesTab(QWidget):
         target = max(0, min(row_idx, self.model.rowCount() - 1))
         self.table.selectRow(target)
         self.table.scrollTo(
-            self.model.index(target, 0),
+            self.model.index(target, self.COL_SECTION),
             QTableView.ScrollHint.PositionAtCenter,
         )
         self.on_row_selected()
@@ -915,9 +1103,13 @@ class EntriesTab(QWidget):
         entry_id = str(row["entry_id"])
 
         self._loading_model = True
-        self.model.item(row_idx, 2).setText(str(row.get("headword_raw") or ""))
-        self.model.item(row_idx, 3).setText(str(row.get("pron_raw") or ""))
-        self.model.item(row_idx, 4).setText(str(row.get("definition_raw") or ""))
+        self.model.item(row_idx, self.COL_HEADWORD).setText(
+            str(row.get("headword_raw") or "")
+        )
+        self.model.item(row_idx, self.COL_PRON).setText(str(row.get("pron_raw") or ""))
+        self.model.item(row_idx, self.COL_DEFINITION).setText(
+            str(row.get("definition_raw") or "")
+        )
         self._loading_model = False
 
         self.dirty_by_entry.pop(entry_id, None)
