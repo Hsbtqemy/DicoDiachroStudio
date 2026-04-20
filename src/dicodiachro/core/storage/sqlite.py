@@ -308,6 +308,18 @@ def create_schema(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(corpus_id) REFERENCES dictionaries(dict_id)
         );
 
+        CREATE TABLE IF NOT EXISTS entry_images (
+            image_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id TEXT NOT NULL,
+            dict_id TEXT NOT NULL,
+            image_path TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'pdf_crop',
+            bbox_json TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(entry_id) REFERENCES entries(entry_id),
+            FOREIGN KEY(dict_id) REFERENCES dictionaries(dict_id)
+        );
+
         CREATE TABLE IF NOT EXISTS entry_overrides (
             override_id INTEGER PRIMARY KEY AUTOINCREMENT,
             corpus_id TEXT NOT NULL,
@@ -346,6 +358,8 @@ def create_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_entry_overrides_source_key ON entry_overrides(source_id, record_key);
         CREATE INDEX IF NOT EXISTS idx_entry_overrides_entry ON entry_overrides(entry_id);
         CREATE INDEX IF NOT EXISTS idx_entries_dict_manual_created ON entries(dict_id, manual_created);
+        CREATE INDEX IF NOT EXISTS idx_entry_images_entry ON entry_images(entry_id);
+        CREATE INDEX IF NOT EXISTS idx_entry_images_dict ON entry_images(dict_id);
         """
     )
     _ensure_entries_columns(conn)
@@ -390,6 +404,7 @@ def _ensure_entries_columns(conn: sqlite3.Connection) -> None:
         "record_key": "TEXT",
         "page": "INTEGER",
         "extra_json": "TEXT",
+        "index_key": "TEXT",
     }
     for column_name, column_type in expected_columns.items():
         if column_name in existing_columns:
@@ -429,6 +444,9 @@ def _ensure_entries_indexes(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entries_dict_alpha_norm ON entries(dict_id, alpha_bucket, headword_norm)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entries_index_key ON entries(index_key)"
     )
 
 
@@ -1020,6 +1038,15 @@ class SQLiteStore:
                     for row in rows
                 ],
             )
+            # Fill index_key from headword_norm only for entries that have none yet
+            conn.executemany(
+                """
+                UPDATE entries SET index_key=?
+                WHERE entry_id=? AND dict_id=?
+                  AND (index_key IS NULL OR TRIM(COALESCE(index_key,''))='')
+                """,
+                [(row["headword_norm"], row["entry_id"], dict_id) for row in rows],
+            )
             conn.commit()
 
     def update_entry_edit_fields(
@@ -1028,7 +1055,7 @@ class SQLiteStore:
         dict_id: str,
         field_changes: dict[str, Any],
     ) -> None:
-        allowed_fields = {"headword_edit", "pron_edit", "definition_edit", "status"}
+        allowed_fields = {"headword_edit", "pron_edit", "definition_edit", "status", "index_key"}
         updates: dict[str, Any] = {
             key: value for key, value in field_changes.items() if key in allowed_fields
         }
@@ -1485,6 +1512,53 @@ class SQLiteStore:
                     """,
                     (corpus_id, field_id, label, field_type, sort_order, optional),
                 )
+            conn.commit()
+
+    def add_entry_image(
+        self,
+        entry_id: str,
+        dict_id: str,
+        image_path: str,
+        *,
+        source: str = "pdf_crop",
+        bbox: dict[str, Any] | None = None,
+    ) -> int:
+        """Register an image for an entry. Returns the new image_id."""
+        with connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO entry_images(entry_id, dict_id, image_path, source, bbox_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry_id,
+                    dict_id,
+                    image_path,
+                    source,
+                    json.dumps(bbox, ensure_ascii=False) if bbox else None,
+                    utc_now_iso(),
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid or 0
+
+    def get_entry_images(self, entry_id: str) -> list[dict[str, Any]]:
+        """Return all images attached to an entry, ordered by creation date."""
+        with connect(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT image_id, entry_id, dict_id, image_path, source, bbox_json, created_at
+                FROM entry_images
+                WHERE entry_id=?
+                ORDER BY created_at
+                """,
+                (entry_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_entry_image(self, image_id: int) -> None:
+        with connect(self.db_path) as conn:
+            conn.execute("DELETE FROM entry_images WHERE image_id=?", (image_id,))
             conn.commit()
 
     def update_entry_extra(self, entry_id: str, updates: dict[str, str]) -> None:

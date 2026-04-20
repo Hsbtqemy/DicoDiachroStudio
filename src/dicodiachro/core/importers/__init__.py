@@ -1,6 +1,7 @@
 """Input importers for DicoDiachro."""
 
 from .csv_import import import_csv_batch, list_csv_files
+from .pdf_entry_import import PDFEntryImportError, PDFEntryImportResult, import_pdf_entries
 from .pdf_text_import import PDFTextImportError, PDFTextImportResult, import_pdf_text
 from .text_import import import_text_batch, list_text_files, merge_text_files
 from .url_import import import_from_share_link
@@ -8,6 +9,9 @@ from .url_import import import_from_share_link
 __all__ = [
     "import_csv_batch",
     "list_csv_files",
+    "PDFEntryImportError",
+    "PDFEntryImportResult",
+    "import_pdf_entries",
     "PDFTextImportError",
     "PDFTextImportResult",
     "import_pdf_text",

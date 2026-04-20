@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QBrush, QKeySequence, QPalette, QStandardItem, QStandardItemModel
+from PySide6.QtGui import QAction, QBrush, QKeySequence, QPalette, QPixmap, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QMessageBox,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QSpinBox,
@@ -115,6 +116,14 @@ class EntriesTab(QWidget):
         self.details = QTextEdit()
         self.details.setReadOnly(True)
 
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setMinimumHeight(80)
+        self.image_scroll = QScrollArea()
+        self.image_scroll.setWidget(self.image_label)
+        self.image_scroll.setWidgetResizable(True)
+        self.image_scroll.setVisible(False)
+
         self.search = QLineEdit()
         self.search.setPlaceholderText("Rechercher...")
         self.search.returnPressed.connect(self.on_search)
@@ -161,9 +170,15 @@ class EntriesTab(QWidget):
         left_layout.addWidget(self.toolbar_status_nav, 0)
         left_layout.addWidget(self.table, 1)
 
+        self.right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.right_splitter.addWidget(self.details)
+        self.right_splitter.addWidget(self.image_scroll)
+        self.right_splitter.setStretchFactor(0, 2)
+        self.right_splitter.setStretchFactor(1, 1)
+
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.addWidget(self.left_panel)
-        self.splitter.addWidget(self.details)
+        self.splitter.addWidget(self.right_splitter)
         self.splitter.setStretchFactor(0, 3)
         self.splitter.setStretchFactor(1, 2)
         self.splitter.setSizes([980, 420])
@@ -1262,6 +1277,42 @@ class EntriesTab(QWidget):
             ],
         }
         self.details.setPlainText(json.dumps(details, ensure_ascii=False, indent=2))
+        self._load_entry_image(entry_id)
+
+    def _load_entry_image(self, entry_id: str) -> None:
+        images = self.state.store.get_entry_images(entry_id) if self.state.store else []
+        if not images:
+            self.image_scroll.setVisible(False)
+            self.image_label.clear()
+            return
+
+        img_path_str = images[0].get("image_path", "")
+        if not img_path_str:
+            self.image_scroll.setVisible(False)
+            return
+
+        from pathlib import Path
+
+        img_path = Path(img_path_str)
+        if not img_path.is_absolute() and self.state.project_dir:
+            img_path = self.state.project_dir / img_path
+
+        pixmap = QPixmap(str(img_path))
+        if pixmap.isNull():
+            self.image_scroll.setVisible(False)
+            return
+
+        self.image_label.setPixmap(
+            pixmap.scaled(
+                self.image_scroll.viewport().size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        self.image_scroll.setVisible(True)
+        if self.right_splitter.sizes()[1] < 80:
+            total = sum(self.right_splitter.sizes()) or 400
+            self.right_splitter.setSizes([int(total * 0.6), int(total * 0.4)])
 
     def show_entry_history(self) -> None:
         if not self.state.store or not self.state.active_dict_id:
@@ -1414,3 +1465,6 @@ class EntriesTab(QWidget):
         left = int(total * 0.7)
         right = max(1, total - left)
         self.splitter.setSizes([left, right])
+        if self.image_scroll.isVisible():
+            right_total = max(self.right_splitter.height(), 400)
+            self.right_splitter.setSizes([int(right_total * 0.6), int(right_total * 0.4)])

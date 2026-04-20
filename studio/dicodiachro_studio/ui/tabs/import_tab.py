@@ -7,6 +7,7 @@ from urllib.parse import unquote, urlparse
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -26,6 +27,11 @@ from PySide6.QtWidgets import (
 )
 
 from dicodiachro.core.importers.csv_import import import_csv_batch
+from dicodiachro.core.importers.pdf_entry_import import (
+    PDFEntryImportError,
+    Signal as PDFEntrySignal,
+    import_pdf_entries,
+)
 from dicodiachro.core.importers.pdf_text_import import PDFTextImportError, import_pdf_text
 from dicodiachro.core.importers.text_import import import_text_batch
 from dicodiachro.core.importers.url_import import import_from_share_link
@@ -82,6 +88,7 @@ class ImportTab(QWidget):
         self.selected_text_folder: Path | None = None
         self.selected_csv_file: Path | None = None
         self.selected_pdf_file: Path | None = None
+        self.selected_pdf_entries_file: Path | None = None
 
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText("https://... (share link)")
@@ -108,6 +115,21 @@ class ImportTab(QWidget):
         self.columns_combo.addItem("1", 1)
         self.columns_combo.addItem("2", 2)
         self.columns_combo.addItem("3", 3)
+
+        self.signal_combo = QComboBox()
+        for label, value in [
+            ("Auto", "auto"),
+            ("Graisse (font)", "font"),
+            ("Retrait (indent)", "indent"),
+            ("Espace (gap)", "gap"),
+        ]:
+            self.signal_combo.addItem(label, value)
+
+        self.pdf_entries_file_edit = self._build_readonly_path_edit("Aucun PDF sélectionné")
+        self.save_images_check = QCheckBox("Sauvegarder les images")
+        self.save_images_check.setToolTip(
+            "Enregistre un crop JPEG par entrée dans data/raw/images/<corpus>/"
+        )
 
         self.log = QTextEdit()
         self.log.setReadOnly(True)
@@ -147,6 +169,11 @@ class ImportTab(QWidget):
         import_pdf_btn = QPushButton("Importer PDF texte")
         reveal_pdf_btn = QPushButton("Révéler")
         open_pdf_btn = QPushButton("Ouvrir dossier")
+
+        browse_pdf_entries_btn = QPushButton("Parcourir…")
+        import_pdf_entries_btn = QPushButton("Importer PDF entrées")
+        reveal_pdf_entries_btn = QPushButton("Révéler")
+        open_pdf_entries_btn = QPushButton("Ouvrir dossier")
 
         manage_corpus_btn = QPushButton("Gérer les corpus…")
         manage_corpus_adv_btn = QPushButton("Gérer les corpus…")
@@ -192,6 +219,15 @@ class ImportTab(QWidget):
         import_pdf_btn.clicked.connect(self.import_selected_pdf)
         reveal_pdf_btn.clicked.connect(lambda: self._reveal_selected_path(self.selected_pdf_file))
         open_pdf_btn.clicked.connect(lambda: self._open_selected_directory(self.selected_pdf_file))
+
+        browse_pdf_entries_btn.clicked.connect(self.browse_pdf_entries_file)
+        import_pdf_entries_btn.clicked.connect(self.import_selected_pdf_entries)
+        reveal_pdf_entries_btn.clicked.connect(
+            lambda: self._reveal_selected_path(self.selected_pdf_entries_file)
+        )
+        open_pdf_entries_btn.clicked.connect(
+            lambda: self._open_selected_directory(self.selected_pdf_entries_file)
+        )
 
         manage_corpus_btn.clicked.connect(self.manage_corpora)
         manage_corpus_adv_btn.clicked.connect(self.manage_corpora)
@@ -246,6 +282,17 @@ class ImportTab(QWidget):
         source_grid.addWidget(open_pdf_btn, 3, 5)
         source_grid.addWidget(QLabel("Colonnes"), 3, 6)
         source_grid.addWidget(self.columns_combo, 3, 7)
+
+        source_grid.addWidget(QLabel("Importer PDF (segmentation entrées)"), 4, 0)
+        source_grid.addWidget(self.pdf_entries_file_edit, 4, 1)
+        source_grid.addWidget(browse_pdf_entries_btn, 4, 2)
+        source_grid.addWidget(import_pdf_entries_btn, 4, 3)
+        source_grid.addWidget(reveal_pdf_entries_btn, 4, 4)
+        source_grid.addWidget(open_pdf_entries_btn, 4, 5)
+        source_grid.addWidget(QLabel("Signal"), 4, 6)
+        source_grid.addWidget(self.signal_combo, 4, 7)
+        source_grid.addWidget(self.save_images_check, 4, 8)
+
         source_grid.setColumnStretch(1, 1)
 
         advanced_grid = QGridLayout()
@@ -582,6 +629,20 @@ class ImportTab(QWidget):
         self.selected_pdf_file = Path(selected_file)
         self.pdf_file_edit.setText(str(self.selected_pdf_file))
 
+    def browse_pdf_entries_file(self) -> None:
+        if not self._require_project():
+            return
+        selected_file, _ = QFileDialog.getOpenFileName(
+            self,
+            "Sélectionner un PDF océrisé (segmentation par entrées)",
+            str(self.state.project_dir),
+            "PDF (*.pdf)",
+        )
+        if not selected_file:
+            return
+        self.selected_pdf_entries_file = Path(selected_file)
+        self.pdf_entries_file_edit.setText(str(self.selected_pdf_entries_file))
+
     @staticmethod
     def _suggested_corpus_name(source: Path | str | None) -> str:
         if isinstance(source, Path):
@@ -798,6 +859,56 @@ class ImportTab(QWidget):
 
         self._start_job(_job)
 
+    def _import_pdf_entries_path(self, pdf_path: Path) -> None:
+        if not self._require_project():
+            return
+        if not self._ensure_corpus_or_prompt(self._suggested_corpus_name(pdf_path)):
+            return
+
+        project_dir = self.state.project_dir
+        assert project_dir is not None
+        columns = int(self.columns_combo.currentData() or 1)
+        signal: PDFEntrySignal = self.signal_combo.currentData() or "auto"
+        save_images = self.save_images_check.isChecked()
+
+        def _job() -> dict[str, object]:
+            try:
+                imported = import_pdf_entries(
+                    project_dir=project_dir,
+                    pdf_path=pdf_path,
+                    columns=columns,
+                    signal=signal,
+                    save_images=save_images,
+                    dict_id=self._selected_dict_id(),
+                )
+            except PDFEntryImportError as exc:
+                raise RuntimeError(f"{exc.code}: {exc}") from exc
+
+            register_import_event(
+                project_dir,
+                {
+                    "type": "pdf_entries",
+                    "dict_id": self._selected_dict_id(),
+                    "pdf_path": str(pdf_path),
+                    "columns": columns,
+                    "signal": imported.signal_used,
+                    **imported.as_dict(),
+                },
+            )
+            return {
+                "action": "import_pdf_entries",
+                "dict_id": self._selected_dict_id(),
+                "pdf_path": str(pdf_path),
+                "columns": columns,
+                "signal_used": imported.signal_used,
+                "output_path": str(imported.output_path),
+                "entries_found": imported.entries_found,
+                "pages_total": imported.pages_total,
+                "pages_with_text": imported.pages_with_text,
+            }
+
+        self._start_job(_job)
+
     def _import_csv_path(self, input_path: Path) -> None:
         if not self._require_project():
             return
@@ -846,6 +957,12 @@ class ImportTab(QWidget):
             return
         self._import_pdf_path(self.selected_pdf_file)
 
+    def import_selected_pdf_entries(self) -> None:
+        if not self.selected_pdf_entries_file:
+            QMessageBox.information(self, "PDF", "Sélectionnez un PDF océrisé.")
+            return
+        self._import_pdf_entries_path(self.selected_pdf_entries_file)
+
     def import_selected_csv(self) -> None:
         if not self.selected_csv_file:
             QMessageBox.information(self, "CSV", "Sélectionnez un fichier CSV.")
@@ -876,14 +993,24 @@ class ImportTab(QWidget):
 
         if classified.pdf_files:
             pdf_path = classified.pdf_files[0]
-            self.selected_pdf_file = pdf_path
-            self.pdf_file_edit.setText(str(pdf_path))
-            if self._ask_drop_action(
-                "PDF détecté",
-                f"Importer {pdf_path.name} comme PDF texte ABBYY ?",
-                "Importer PDF texte",
-            ):
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("PDF détecté")
+            dialog.setText(
+                f"{pdf_path.name}\n\nComment importer ce PDF ?"
+            )
+            btn_text = dialog.addButton("PDF texte (ABBYY)", QMessageBox.ButtonRole.AcceptRole)
+            btn_entries = dialog.addButton("Segmentation par entrées", QMessageBox.ButtonRole.ActionRole)
+            dialog.addButton(QMessageBox.StandardButton.Cancel)
+            dialog.exec()
+            clicked = dialog.clickedButton()
+            if clicked == btn_text:
+                self.selected_pdf_file = pdf_path
+                self.pdf_file_edit.setText(str(pdf_path))
                 self.import_selected_pdf()
+            elif clicked == btn_entries:
+                self.selected_pdf_entries_file = pdf_path
+                self.pdf_entries_file_edit.setText(str(pdf_path))
+                self.import_selected_pdf_entries()
             return
 
         if classified.image_files:

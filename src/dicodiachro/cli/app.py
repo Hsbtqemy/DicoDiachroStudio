@@ -32,9 +32,15 @@ from dicodiachro.core.exporters.csv_jsonl import (
     import_entries_jsonl,
 )
 from dicodiachro.core.exporters.excel_xlsx import export_comparison_xlsx
+from dicodiachro.core.exporters.index_export import export_entries_index
 from dicodiachro.core.exporters.word_docx import export_comparison_docx
 from dicodiachro.core.filters import filter_by_accents, filter_by_prefix, filter_by_syllables
 from dicodiachro.core.importers.csv_import import import_csv_batch
+from dicodiachro.core.importers.pdf_entry_import import (
+    PDFEntryImportError,
+    Signal as PDFEntrySignal,
+    import_pdf_entries,
+)
 from dicodiachro.core.importers.pdf_text_import import (
     PDFTextImportError,
     import_pdf_text,
@@ -301,6 +307,103 @@ def import_pdf_text_cmd(
         payload["next"] = {
             "hint": "Run `dicodiachro run` with --dict-id and --profile when ready.",
             "sources": [str(path) for path in imported.output_text_paths],
+        }
+
+    if not out:
+        payload["project_raw_imports"] = str(paths.raw_dir / "imports")
+    _print_json(payload)
+
+
+@import_app.command("pdf-entries")
+def import_pdf_entries_cmd(
+    project_dir: Path,
+    pdf_path: Path,
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help="Fichier ou dossier de sortie pour les entrées extraites.",
+    ),
+    columns: int = typer.Option(
+        1,
+        "--columns",
+        min=1,
+        max=3,
+        help="Nombre de colonnes de texte (1..3).",
+    ),
+    signal: PDFEntrySignal = typer.Option(
+        "auto",
+        "--signal",
+        help="Stratégie de segmentation: auto | font | indent | gap.",
+    ),
+    dict_id: str | None = typer.Option(
+        None,
+        "--dict-id",
+        help="Mode pratique: lance le pipeline après l'import.",
+    ),
+    profile: str = typer.Option(
+        "reading_v1",
+        "--profile",
+        help="Profil utilisé uniquement si --dict-id est fourni.",
+    ),
+    parser: str | None = typer.Option(
+        None,
+        "--parser",
+        help="Preset parser utilisé uniquement si --dict-id est fourni.",
+    ),
+    save_images: bool = typer.Option(
+        False,
+        "--save-images",
+        help="Sauvegarder un crop JPEG par entrée dans data/raw/images/<dict-id>/.",
+    ),
+) -> None:
+    """Import un PDF océrisé en segmentant par entrées (font/indent/gap/auto)."""
+    paths = init_project(project_dir)
+    try:
+        imported = import_pdf_entries(
+            project_dir=project_dir,
+            pdf_path=pdf_path,
+            out=out,
+            columns=columns,
+            signal=signal,
+            save_images=save_images,
+            dict_id=dict_id,
+        )
+    except PDFEntryImportError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+    except RuntimeError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
+
+    register_import_event(
+        project_dir,
+        {
+            "type": "pdf_entries",
+            "pdf_path": str(pdf_path),
+            "columns": columns,
+            "signal": imported.signal_used,
+            **imported.as_dict(),
+        },
+    )
+
+    payload: dict[str, Any] = {"import": imported.as_dict()}
+
+    if dict_id:
+        try:
+            payload["pipeline"] = run_pipeline(
+                project_dir=project_dir,
+                dict_id=dict_id,
+                profile_name=profile,
+                source_paths=[imported.output_path],
+                parser_name=parser,
+            )
+        except PipelineError as exc:
+            typer.echo(str(exc))
+            raise typer.Exit(code=1) from exc
+    else:
+        payload["next"] = {
+            "hint": "Lancez `dicodiachro run` avec --dict-id et --profile.",
+            "source": str(imported.output_path),
         }
 
     if not out:
@@ -1018,6 +1121,31 @@ def export_entries(
     else:
         result = export_entries_csv(store, dict_id, out)
     typer.echo(str(result))
+
+
+@export_app.command("index")
+def export_index(
+    project_dir: Path,
+    dict_ids: Annotated[
+        list[str] | None,
+        typer.Option("--dict-id", help="Corpus à inclure (répéter). Défaut: tous."),
+    ] = None,
+    out: Path | None = typer.Option(None, "--out", help="Fichier CSV de sortie."),
+    only_with_page: bool = typer.Option(
+        False, "--only-with-page", help="Exclure les entrées sans numéro de page."
+    ),
+) -> None:
+    """Exporte un index unifié groupé par index_key (toutes graphies confondues)."""
+    paths = project_paths(project_dir)
+    store = SQLiteStore(paths.db_path)
+    out_path = out or (paths.derived_dir / "index.csv")
+    result = export_entries_index(
+        store,
+        out_path,
+        dict_ids=dict_ids or None,
+        only_with_page=only_with_page,
+    )
+    _print_json({"output": str(result)})
 
 
 @export_app.command("compare")

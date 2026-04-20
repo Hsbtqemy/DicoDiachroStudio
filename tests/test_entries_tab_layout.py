@@ -56,7 +56,9 @@ def test_entries_tab_layout_toolbar_is_inside_splitter_left_panel(tmp_path: Path
     assert tab.toolbar_edit_structure in toolbars
     assert tab.toolbar_status_nav in toolbars
     assert left_panel.findChild(QTableView) is tab.table
-    assert splitter.widget(1) is tab.details
+    assert splitter.widget(1) is tab.right_splitter
+    assert tab.right_splitter.widget(0) is tab.details
+    assert tab.right_splitter.widget(1) is tab.image_scroll
 
     tab.reset_layout()
     app.processEvents()
